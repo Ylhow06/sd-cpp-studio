@@ -1,0 +1,4132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地生图工作台</title>
+<style>
+:root{
+  --bg:#0d0f13; --bg2:#141821; --bg3:#1b2029; --bg4:#232936; --line:#2b3342;
+  --fg:#e8ebf1; --fg2:#98a2b3; --fg3:#5d6879;
+  --acc:#4c7dff; --acc2:#7ba0ff; --accd:#2a4a99;
+  --ok:#3fb950; --warn:#d29922; --err:#f85149; --paint:#ff3b30;
+  --r:9px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--fg);
+  font:13.5px/1.6 "Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+button,input,textarea,select{font-family:inherit}
+
+/* ══════════ 顶栏 ══════════ */
+header{
+  display:flex;align-items:center;gap:12px;padding:0 16px;height:48px;
+  background:var(--bg2);border-bottom:1px solid var(--line);flex:0 0 auto;
+}
+.logo{font-size:14px;font-weight:700;letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+.logo i{width:7px;height:7px;border-radius:50%;background:var(--fg3);transition:.3s;flex:0 0 auto}
+.logo i.on{background:var(--ok);box-shadow:0 0 9px var(--ok)}
+.logo i.off{background:var(--err);box-shadow:0 0 9px var(--err)}
+.logo i.busy{background:var(--warn);box-shadow:0 0 9px var(--warn);animation:bl .9s infinite}
+@keyframes bl{50%{opacity:.25}}
+#stat{font-size:12px;color:var(--fg2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbtn{
+  background:transparent;border:1px solid var(--line);color:var(--fg2);border-radius:6px;
+  padding:5px 10px;font-size:12px;cursor:pointer;transition:.15s;white-space:nowrap;
+}
+.hbtn:hover{border-color:var(--acc);color:var(--fg)}
+.hbtn.on{border-color:var(--ok);color:var(--ok)}
+.hbtn.set{border-color:var(--acc);color:var(--acc2)}
+.hbtn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ══════════ 主区 ══════════ */
+main{flex:1;display:flex;min-height:0}
+
+/* ── 左栏 ── */
+#left{
+  width:352px;flex:0 0 auto;background:var(--bg2);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0;
+}
+
+/* 模式标签 */
+#tabs{display:flex;flex:0 0 auto;background:var(--bg);border-bottom:1px solid var(--line)}
+.tab{
+  flex:1;padding:11px 4px;text-align:center;font-size:13px;cursor:pointer;
+  color:var(--fg3);border-bottom:2px solid transparent;transition:.15s;
+  display:flex;flex-direction:column;align-items:center;gap:2px;user-select:none;
+}
+.tab:hover{color:var(--fg2);background:rgba(255,255,255,.02)}
+.tab.on{color:var(--acc2);border-bottom-color:var(--acc);background:rgba(76,125,255,.07);font-weight:600}
+.tab .ic{font-size:15px;line-height:1}
+
+#panes{flex:1;overflow-y:auto;overflow-x:hidden}
+.pane{display:none;padding:14px}
+.pane.on{display:block}
+
+/* ── 控件 ── */
+.sec{margin-bottom:16px}
+.sec > .h{
+  font-size:11px;font-weight:700;color:var(--fg3);letter-spacing:1.2px;
+  text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:7px;
+}
+.sec > .h::after{content:"";flex:1;height:1px;background:var(--line)}
+.sec.collapsible > .h{cursor:pointer;user-select:none}
+.sec.collapsible > .h .cv{font-size:9px;transition:.2s;color:var(--fg3)}
+.sec.collapsible.cl > .h .cv{transform:rotate(-90deg)}
+.sec.collapsible.cl > .bd{display:none}
+
+label{display:block;font-size:12px;color:var(--fg2);margin:10px 0 5px}
+label:first-child{margin-top:0}
+label .v{color:var(--fg);font-weight:600;float:right;font-variant-numeric:tabular-nums}
+
+textarea,input[type=text],input[type=number],select{
+  width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);
+  border-radius:7px;padding:8px 10px;font-size:13px;line-height:1.5;outline:none;transition:.15s;
+}
+textarea{resize:vertical;min-height:76px}
+textarea:focus,input:focus,select:focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(76,125,255,.14)}
+input[type=number]{font-variant-numeric:tabular-nums}
+select{
+  cursor:pointer;appearance:none;padding-right:26px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--fg2) 50%),linear-gradient(135deg,var(--fg2) 50%,transparent 50%);
+  background-position:calc(100% - 14px) 50%,calc(100% - 9px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+}
+input[type=range]{
+  width:100%;height:20px;background:transparent;border:none;outline:none;padding:0;
+  -webkit-appearance:none;appearance:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{height:4px;background:var(--bg4);border-radius:2px}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--acc);
+  margin-top:-5px;border:2px solid var(--bg2);transition:.15s;
+}
+input[type=range]::-webkit-slider-thumb:hover{background:var(--acc2);transform:scale(1.15)}
+
+.row{display:flex;gap:7px;align-items:flex-end}
+.row > *{flex:1;min-width:0}
+.row.tight{gap:5px}
+
+button.b{
+  background:var(--bg3);color:var(--fg);border:1px solid var(--line);border-radius:7px;
+  padding:7px 11px;font-size:12.5px;cursor:pointer;transition:.15s;white-space:nowrap;
+}
+button.b:hover:not(:disabled){border-color:var(--acc);color:#fff;background:var(--bg4)}
+button.b:disabled{opacity:.35;cursor:not-allowed}
+button.b.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button.b.pri:hover:not(:disabled){background:var(--acc2);border-color:var(--acc2)}
+button.b.on{border-color:var(--acc);background:rgba(76,125,255,.16);color:#fff}
+button.b.sm{padding:5px 8px;font-size:12px}
+
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{
+  padding:4px 10px;border-radius:16px;border:1px solid var(--line);background:var(--bg);
+  font-size:12px;cursor:pointer;transition:.15s;color:var(--fg2);user-select:none;
+}
+.chip:hover{border-color:var(--acc);color:var(--fg)}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+
+.hint{font-size:11px;color:var(--fg3);margin-top:6px;line-height:1.55}
+.warn{font-size:11.5px;color:var(--warn);margin-top:6px;line-height:1.5;display:none}
+.warn.show{display:block}
+
+/* 输入图投放区 */
+.drop{
+  border:1.5px dashed var(--line);border-radius:var(--r);padding:16px 12px;text-align:center;
+  cursor:pointer;transition:.15s;background:var(--bg);
+}
+.drop:hover,.drop.over{border-color:var(--acc);background:rgba(76,125,255,.06)}
+.drop .ic{font-size:22px;opacity:.5;display:block;margin-bottom:5px}
+.drop .t1{font-size:12.5px;color:var(--fg2)}
+.drop .t2{font-size:11px;color:var(--fg3);margin-top:3px}
+
+.inBox{display:none;gap:10px;align-items:flex-start}
+.inBox.show{display:flex}
+.inThumb{width:72px;height:72px;object-fit:cover;border-radius:7px;border:1px solid var(--line);flex:0 0 auto}
+.inInfo{flex:1;min-width:0;font-size:11.5px;color:var(--fg3);line-height:1.7}
+.inInfo b{color:var(--fg2);font-weight:600}
+
+/* ── 右栏 ── */
+#right{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+
+/* ★ 主图自适应（第三次修正，前两次都没解决）
+   问题：竖图（2:3 = 512×768）在舞台里显示不全。
+
+   之前的错法：让 #imgWrap 变成 flex 容器、给 img 写 max-height:100%。
+   没用，因为 #imgWrap 自身是 #stage 的 flex 子项，它没有「确定高度」——
+   它是被内容撑出来的，于是里面的 img 百分比高度照样解析不到。
+   加了 min-height:0 也不行：那只影响「能否缩小」，不影响「百分比基准」。
+
+   真正可靠的做法：让图片脱离内容流。
+   给 #stage 加内边距做留白，#imgWrap 绝对定位铺满这个内边距框，
+   图片用 absolute + inset:0 + object-fit:contain——
+   这样宽高都是「相对定位祖先的确定尺寸」，浏览器必然算得出来，
+   横图竖图都严格等比缩放并居中，永远不裁切。 */
+#stage{
+  flex:1;display:flex;align-items:center;justify-content:center;min-height:0;min-width:0;
+  padding:12px 20px;position:relative;overflow:hidden;
+}
+#imgWrap{
+  position:absolute;inset:12px 20px;display:none;line-height:0;
+}
+#imgWrap.show{display:block}
+#imgWrap img{position:absolute;inset:0;width:100%;height:100%;
+  object-fit:contain;object-position:center;
+  border-radius:8px;
+  box-shadow:0 10px 46px rgba(0,0,0,.65);cursor:zoom-in;transition:opacity .12s}
+#imgWrap img:hover{opacity:.93}
+/* ★ 蒙版画布必须和图片「实际显示的那块区域」严格重合，否则画笔会画偏。
+   图片用 object-fit:contain 居中，四周可能有留白，
+   所以蒙版的尺寸与位置由 JS 按图片的实际渲染框同步（syncMaskLayerToImage）。 */
+#maskLayer{position:absolute;display:none;touch-action:none;pointer-events:none}
+#maskLayer.on{display:block;cursor:crosshair;pointer-events:auto}
+
+#empty{text-align:center;color:var(--fg3);font-size:13px;line-height:2.1;user-select:none}
+#empty .big{font-size:38px;opacity:.22;display:block;margin-bottom:10px}
+#empty b{color:var(--fg2)}
+
+/* ── 点击放大（灯箱）──
+   舞台受面板高度限制，竖图永远看不全，所以给一个全窗口的查看层。
+   滚轮缩放、拖动平移、双击还原；四个入口：点图 / Esc / 点背景 / 点关闭。 */
+#lightbox{
+  position:fixed;inset:0;z-index:60;display:none;
+  background:rgba(6,8,11,.94);backdrop-filter:blur(6px);
+  overflow:hidden;user-select:none;
+}
+#lightbox.show{display:block}
+#lbImg{
+  position:absolute;top:50%;left:50%;transform-origin:center center;
+  border-radius:6px;box-shadow:0 20px 80px rgba(0,0,0,.8);
+  cursor:grab;max-width:none;max-height:none;
+  image-rendering:auto;
+}
+#lbImg.drag{cursor:grabbing;transition:none}
+#lbBar{
+  position:absolute;left:50%;bottom:22px;transform:translateX(-50%);
+  display:flex;align-items:center;gap:9px;z-index:2;
+  background:rgba(20,24,33,.92);border:1px solid var(--line);
+  border-radius:10px;padding:8px 13px;font-size:12px;color:var(--fg2);
+  white-space:nowrap;
+}
+#lbBar .sp{width:1px;height:16px;background:var(--line)}
+#lbInfo{font-variant-numeric:tabular-nums;min-width:112px;text-align:center}
+#lbBar button{
+  background:transparent;border:1px solid var(--line);color:var(--fg2);
+  border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;transition:.15s;
+}
+#lbBar button:hover{border-color:var(--acc);color:var(--fg)}
+#lbClose{
+  position:absolute;top:16px;right:20px;z-index:2;
+  background:rgba(20,24,33,.92);border:1px solid var(--line);color:var(--fg2);
+  border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;transition:.15s;
+}
+#lbClose:hover{border-color:var(--err);color:var(--err)}
+#lbHint{
+  position:absolute;top:18px;left:22px;z-index:2;font-size:11.5px;
+  color:var(--fg3);pointer-events:none;
+}
+
+/* 生成中 */
+#overlay{
+  position:absolute;inset:0;background:rgba(13,15,19,.84);backdrop-filter:blur(4px);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:15px;z-index:8;
+}
+#overlay.show{display:flex}
+.spin{width:44px;height:44px;border:3px solid var(--line);border-top-color:var(--acc);
+  border-radius:50%;animation:sp .75s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+#ovTxt{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+#ovSub{font-size:12px;color:var(--fg2);font-variant-numeric:tabular-nums}
+#ovBar{width:280px;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+#ovFill{height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2));
+  border-radius:2px;transition:width .45s ease}
+
+/* 蒙版工具浮条 */
+#maskBar{
+  position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:6;
+  display:none;align-items:center;gap:6px;padding:7px 10px;border-radius:24px;
+  background:rgba(20,24,33,.96);border:1px solid var(--line);box-shadow:0 6px 24px rgba(0,0,0,.5);
+}
+#maskBar.show{display:flex}
+#maskBar button.b{border-radius:16px;padding:5px 11px}
+#maskBar .sep{width:1px;height:20px;background:var(--line);margin:0 3px}
+#maskBar input[type=range]{width:88px}
+
+/* 底部工具条 */
+#bar{
+  flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 14px;
+  background:var(--bg2);border-top:1px solid var(--line);flex-wrap:wrap;
+}
+#bar .sp{flex:1;min-width:8px}
+#meta{font-size:11.5px;color:var(--fg3);font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#go{min-width:132px;padding:9px 18px;font-size:13.5px}
+#go.busy{background:var(--bg4);border-color:var(--line);color:var(--fg2)}
+
+/* 批量缩略图条（带可折叠表头） */
+#batchWrap{flex:0 0 auto;display:none;background:var(--bg3);border-top:1px solid var(--line)}
+#batchWrap.show{display:block}
+#batchHead{
+  display:flex;align-items:center;gap:8px;padding:5px 14px;font-size:11px;color:var(--fg3);
+  border-bottom:1px solid var(--line);
+}
+#batchHead .sp{flex:1}
+#batchHead #batchTitle{font-weight:600;color:var(--fg2);font-size:11.5px}
+#batchStrip{
+  display:flex;align-items:center;gap:7px;padding:9px 14px;overflow-x:auto;
+}
+#batchStrip img{
+  width:74px;height:74px;object-fit:cover;border-radius:6px;cursor:pointer;flex:0 0 auto;
+  border:2px solid transparent;transition:.15s;
+}
+#batchStrip img:hover{border-color:var(--acc2);transform:scale(1.05)}
+#batchStrip img.sel{border-color:var(--acc)}
+
+/* ★ 折叠：整条隐藏，只留表头 */
+#batchWrap.folded #batchStrip,
+#histWrap.folded #hist{display:none}
+.fold{
+  flex:0 0 auto;width:20px;height:20px;line-height:1;padding:0;cursor:pointer;
+  background:transparent;border:1px solid var(--line);border-radius:4px;
+  color:var(--fg2);font-size:10px;transition:.15s;
+}
+.fold:hover{border-color:var(--acc2);color:var(--fg1)}
+#batchWrap.folded .fold,
+#histWrap.folded .fold{transform:rotate(-90deg)}
+
+/* 历史 */
+#histWrap{flex:0 0 auto;background:var(--bg2);border-top:1px solid var(--line);display:none}
+#histWrap.show{display:block}
+#histHead{
+  display:flex;align-items:center;gap:8px;padding:5px 14px;font-size:11px;color:var(--fg3);
+  border-bottom:1px solid var(--line);
+}
+#histHead .sp{flex:1}
+#hist{display:flex;gap:6px;overflow-x:auto;padding:9px 14px;align-items:center;min-height:78px}
+#hist img{
+  width:64px;height:64px;object-fit:cover;border-radius:6px;cursor:pointer;flex:0 0 auto;
+  border:2px solid transparent;transition:.15s;background:var(--bg3);
+}
+#hist img:hover{border-color:var(--acc2);transform:scale(1.07)}
+#hist img.sel{border-color:var(--acc)}
+
+/* 滚动条 */
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#333b4a;border-radius:5px;border:2px solid var(--bg2)}
+::-webkit-scrollbar-thumb:hover{background:#454f61}
+
+/* 拖拽全屏提示 */
+#dragHint{
+  position:fixed;inset:0;background:rgba(13,15,19,.9);z-index:99;display:none;
+  align-items:center;justify-content:center;font-size:17px;color:var(--acc2);
+  border:3px dashed var(--acc);border-radius:12px;
+}
+#dragHint.show{display:flex}
+
+/* ══════════ 批量生图 ══════════ */
+
+/* 配置服务状态条 */
+#cfgBar{
+  display:flex;align-items:center;gap:7px;font-size:11.5px;padding:7px 10px;border-radius:7px;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg3);margin-bottom:14px;line-height:1.45;
+}
+#cfgBar .cdot{width:6px;height:6px;border-radius:50%;background:var(--fg3);flex:0 0 auto}
+#cfgBar.ok{border-color:rgba(63,185,80,.4);color:var(--fg2)}
+#cfgBar.ok .cdot{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+#cfgBar.err{border-color:rgba(248,81,73,.4);color:var(--err)}
+#cfgBar.err .cdot{background:var(--err);box-shadow:0 0 6px var(--err)}
+#cfgBar.busy .cdot{background:var(--warn);animation:bl .9s infinite}
+#cfgBar .sp{flex:1}
+
+/* 模板编辑区 + 校验 */
+#tplBox{position:relative}
+#tplBox textarea{min-height:132px;font-size:12.5px;line-height:1.65}
+#tplBox.bad textarea{border-color:var(--err);box-shadow:0 0 0 2px rgba(248,81,73,.13)}
+#tplErr{
+  display:none;margin-top:7px;padding:7px 10px;border-radius:7px;font-size:11.5px;line-height:1.6;
+  background:rgba(248,81,73,.09);border:1px solid rgba(248,81,73,.35);color:#ffb3ae;
+}
+#tplErr.show{display:block}
+#tplErr .li{margin-top:3px}
+#tplErr .li:first-child{margin-top:0}
+#tplErr .pos{color:var(--fg3);font-variant-numeric:tabular-nums}
+
+/* 模板里识别出的占位符标记 */
+#tplTags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+#tplTags .tg{
+  font-size:11px;padding:3px 8px;border-radius:12px;border:1px solid var(--line);
+  background:var(--bg);color:var(--fg2);cursor:pointer;transition:.15s;
+}
+#tplTags .tg:hover{border-color:var(--acc);color:var(--fg)}
+#tplTags .tg.miss{border-color:rgba(248,81,73,.5);color:#ffb3ae}
+#tplTags .tg b{color:var(--acc2);font-weight:600}
+#tplTags .tg .n{color:var(--fg3);margin-left:4px;font-variant-numeric:tabular-nums}
+
+/* 占位符数组编辑器 */
+.slot{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:9px;background:var(--bg)}
+.slot .sh{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.slot .sh input[type=text]{
+  flex:1;font-size:12.5px;font-weight:600;padding:5px 9px;background:var(--bg2);
+}
+.slot .sh .cnt{font-size:11px;color:var(--fg3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.slot .sh button.b{padding:4px 8px;font-size:12px}
+.slot textarea{
+  min-height:78px;font-size:12.5px;line-height:1.7;background:var(--bg2);
+  font-family:"Consolas","Microsoft YaHei UI",monospace;
+}
+.slot.off{border-color:rgba(248,81,73,.4)}
+.slot .bad{font-size:11px;color:#ffb3ae;margin-top:6px;display:none}
+.slot.off .bad{display:block}
+
+/* 组合数与计划 */
+#comboLine{
+  display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2);
+  padding:9px 11px;border-radius:7px;background:var(--bg);border:1px solid var(--line);
+}
+#comboLine b{color:var(--acc2);font-size:15px;font-variant-numeric:tabular-nums}
+#comboLine .sp{flex:1}
+#comboLine.over{border-color:rgba(248,81,73,.45)}
+#comboLine.over b{color:#ffb3ae}
+
+/* 批次计划卡 */
+#planCard{
+  display:none;border:1px solid rgba(210,153,34,.4);background:rgba(210,153,34,.07);
+  border-radius:8px;padding:11px;margin-bottom:14px;font-size:12px;line-height:1.65;
+}
+#planCard.show{display:block}
+#planCard .pt{font-weight:700;color:var(--warn);margin-bottom:5px;display:flex;align-items:center;gap:6px}
+#planCard .pd{color:var(--fg2)}
+#planCard .pr{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}
+#planCard .pr button.b{padding:5px 11px;font-size:12px}
+#planCard.done{border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.07)}
+#planCard.done .pt{color:var(--ok)}
+/* 本页正在跑这一批：蓝色，且不提供「继续」 */
+#planCard.live{border-color:rgba(76,125,255,.45);background:rgba(76,125,255,.08)}
+#planCard.live .pt{color:var(--acc2)}
+
+/* 组合预览 */
+#comboPrev{
+  font-size:11px;color:var(--fg3);line-height:1.75;max-height:112px;overflow-y:auto;
+  background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:8px 10px;
+  font-family:"Consolas","Microsoft YaHei UI",monospace;
+}
+#comboPrev .r{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#comboPrev .r i{color:var(--acc2);font-style:normal}
+#comboPrev .r u{color:var(--fg2);text-decoration:none}
+
+/* ── 我的模板列表 ── */
+#tplLibList{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+#tplLibList:empty{display:none}
+#tplLibList .tpl{
+  display:flex;align-items:center;gap:7px;padding:7px 9px;border-radius:7px;
+  background:var(--bg);border:1px solid var(--line);transition:.15s;
+}
+#tplLibList .tpl:hover{border-color:var(--acc2)}
+#tplLibList .tpl.cur{border-color:var(--acc);background:rgba(76,125,255,.07)}
+#tplLibList .nm{
+  flex:1;min-width:0;font-size:12.5px;color:var(--fg1);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+#tplLibList .mt{font-size:10.5px;color:var(--fg3);white-space:nowrap;flex:0 0 auto}
+#tplLibList .op{
+  flex:0 0 auto;font-size:11px;padding:3px 8px;border-radius:5px;cursor:pointer;
+  background:var(--bg3);border:1px solid var(--line);color:var(--fg2);
+}
+#tplLibList .op:hover{border-color:var(--acc2);color:var(--fg1)}
+#tplLibList .op.danger:hover{border-color:var(--bad,#ff6b6b);color:var(--bad,#ff6b6b)}
+#tplLibEmpty{font-size:11.5px;color:var(--fg3);line-height:1.8;margin-top:8px}
+
+/* ── 指定保存路径弹窗 ── */
+#pathDlg{
+  position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;
+  background:rgba(8,10,14,.72);backdrop-filter:blur(3px);
+}
+#pathDlg.show{display:flex}
+.pd-box{
+  width:min(620px,92vw);max-height:86vh;display:flex;flex-direction:column;
+  background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 24px 70px rgba(0,0,0,.7);overflow:hidden;
+}
+.pd-head{
+  display:flex;align-items:center;gap:8px;padding:13px 16px;
+  border-bottom:1px solid var(--line);font-size:13.5px;
+}
+.pd-head .pd-x{
+  margin-left:auto;cursor:pointer;color:var(--fg3);font-size:14px;padding:2px 6px;border-radius:5px;
+}
+.pd-head .pd-x:hover{background:var(--bg3);color:var(--fg1)}
+.pd-body{padding:14px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.pd-hint{font-size:11.5px;color:var(--fg3);line-height:1.85}
+.pd-hint b{color:var(--fg2)}
+#pdPath{
+  width:100%;box-sizing:border-box;padding:9px 11px;font-size:12.5px;
+  background:var(--bg);border:1px solid var(--line);border-radius:7px;color:var(--fg1);
+  font-family:"Consolas","Microsoft YaHei UI",monospace;
+}
+#pdPath:focus{outline:none;border-color:var(--acc)}
+.pd-err{font-size:11.5px;color:var(--bad,#ff6b6b);line-height:1.7;min-height:0}
+.pd-err:empty{display:none}
+.pd-list{
+  max-height:190px;overflow-y:auto;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);padding:4px;
+}
+.pd-list:empty{display:none}
+.pd-list .it{
+  padding:5px 9px;font-size:12px;border-radius:5px;cursor:pointer;color:var(--fg2);
+  display:flex;align-items:center;gap:7px;
+}
+.pd-list .it:hover{background:var(--bg3);color:var(--fg1)}
+.pd-nav{display:flex;align-items:center;gap:9px}
+.pd-cur{
+  font-size:11px;color:var(--fg3);font-family:"Consolas",monospace;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;
+}
+.pd-foot{
+  display:flex;align-items:center;gap:8px;padding:12px 16px;
+  border-top:1px solid var(--line);background:var(--bg3);
+}
+.pd-note{font-size:11px;color:var(--fg3);flex:1;line-height:1.6}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><i id="dot"></i>本地生图工作台</div>
+  <span id="stat">正在连接…</span>
+  <button class="hbtn" id="btnDir" title="选择生成结果自动保存的目录（之后每张生成完自动写入）">📁 保存目录：未设置</button>
+  <button class="hbtn" id="btnOpen" title="在 Windows 资源管理器里打开保存目录">🗂️ 打开文件夹</button>
+  <button class="hbtn" id="btnAuto" title="默认开启：每张生成完立刻写入上面选的目录">自动保存：开</button>
+  <button class="hbtn" id="btnReload">重载模型信息</button>
+</header>
+
+<main>
+  <!-- ═══════════ 左栏 ═══════════ -->
+  <aside id="left">
+    <div id="tabs">
+      <div class="tab on" data-mode="txt2img"><span class="ic">✨</span>文生图</div>
+      <div class="tab" data-mode="img2img"><span class="ic">🖼</span>图生图</div>
+      <div class="tab" data-mode="inpaint"><span class="ic">🖌</span>局部重绘</div>
+      <div class="tab" data-mode="batch"><span class="ic">🎲</span>批量</div>
+    </div>
+
+    <div id="panes">
+
+      <!-- ══════ 文生图 ══════ -->
+      <div class="pane on" data-pane="txt2img">
+        <div class="sec">
+          <div class="h">提示词</div>
+          <label>描述你想要的画面</label>
+          <textarea data-f="prompt" placeholder="例：夕阳下的海边灯塔，岩石海岸，海浪拍岸，电影感光影，超高细节"></textarea>
+          <div class="chips" data-chips="txt2img" style="margin-top:9px"></div>
+          <label>排除内容（反向提示词）</label>
+          <textarea data-f="neg" style="min-height:48px" placeholder="例：模糊，低质量，多余手指，水印，文字"></textarea>
+        </div>
+
+        <div class="sec collapsible">
+          <div class="h"><span class="cv">▼</span>画面尺寸</div>
+          <div class="bd">
+            <label>常用比例</label>
+            <div class="chips" data-ratios="txt2img"></div>
+            <div class="row" style="margin-top:11px">
+              <div><label>宽 <span class="v" data-v="w">768</span></label>
+                <input type="range" data-f="w" min="256" max="1536" step="64" value="768"></div>
+              <div><label>高 <span class="v" data-v="h">768</span></label>
+                <input type="range" data-f="h" min="256" max="1536" step="64" value="768"></div>
+            </div>
+            <div class="row" style="margin-top:7px">
+              <button class="b sm" data-act="swap">↔ 交换宽高</button>
+              <button class="b sm" data-act="resetwh">恢复 768×768</button>
+            </div>
+            <div class="warn" data-warn="wh"></div>
+          </div>
+        </div>
+
+        <div class="sec collapsible">
+          <div class="h"><span class="cv">▼</span>生成参数</div>
+          <div class="bd">
+            <label>采样步数 <span class="v" data-v="steps">10</span></label>
+            <input type="range" data-f="steps" min="1" max="30" step="1" value="10">
+            <div class="hint" data-est></div>
+
+            <label>随机种子 <span class="v" data-v="seedlbl">-1</span></label>
+            <div class="row tight">
+              <input type="number" data-f="seed" value="-1">
+              <button class="b sm" data-act="dice" title="随机">🎲</button>
+              <button class="b sm" data-act="uselast" title="用上一张的种子">↺</button>
+            </div>
+
+            <label>文本引导强度 CFG <span class="v" data-v="cfg">1.0</span></label>
+            <input type="range" data-f="cfg" min="0" max="10" step="0.1" value="1">
+            <div class="hint">Z-Image Turbo 是蒸馏模型，保持 1.0。文生图调高只会变糟。</div>
+
+            <label>批量张数 <span class="v" data-v="batch">1</span></label>
+            <input type="range" data-f="batch" min="1" max="8" step="1" value="1">
+            <div class="hint">逐张串行生成：GPU 一次只算一张，每张出来立刻显示并存档，随时可停。</div>
+          </div>
+        </div>
+
+        <div class="sec collapsible cl">
+          <div class="h"><span class="cv">▼</span>高级</div>
+          <div class="bd">
+            <label>采样器</label>
+            <select data-f="sampler"></select>
+            <label>调度器</label>
+            <select data-f="scheduler"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════ 图生图 ══════ -->
+      <div class="pane" data-pane="img2img">
+        <div class="sec">
+          <div class="h">输入图片</div>
+          <div class="drop" data-drop="img2img">
+            <span class="ic">🖼</span>
+            <div class="t1">点击选择 / 拖入图片</div>
+            <div class="t2">也可以直接从历史里点一张</div>
+          </div>
+          <div class="inBox" data-inbox="img2img">
+            <img class="inThumb" data-inthumb="img2img" alt="">
+            <div class="inInfo" data-ininfo="img2img"></div>
+          </div>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm" data-act="useResult" data-arg="img2img">用当前结果图</button>
+            <button class="b sm" data-act="clearInput" data-arg="img2img">清除</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">重绘设置</div>
+          <label>重绘强度 <span class="v" data-v="strength">0.60</span></label>
+          <input type="range" data-f="strength" min="0.05" max="1" step="0.05" value="0.6">
+          <div class="hint">
+            <b style="color:var(--fg2)">0.2–0.4</b> 只微调光影风格，构图几乎不变<br>
+            <b style="color:var(--fg2)">0.5–0.7</b> 明显改变内容，大致构图保留<br>
+            <b style="color:var(--fg2)">0.8–1.0</b> 基本重画，只留一点轮廓暗示
+          </div>
+          <label style="margin-top:12px">输出尺寸</label>
+          <select data-f="sizeMode">
+            <option value="same">跟随输入图尺寸</option>
+            <option value="custom">自定义</option>
+          </select>
+          <div class="row" data-sizebox="img2img" style="display:none;margin-top:9px">
+            <div><label>宽 <span class="v" data-v="w">768</span></label>
+              <input type="range" data-f="w" min="256" max="1536" step="64" value="768"></div>
+            <div><label>高 <span class="v" data-v="h">512</span></label>
+              <input type="range" data-f="h" min="256" max="1536" step="64" value="512"></div>
+          </div>
+          <div class="warn" data-warn="wh"></div>
+        </div>
+
+        <div class="sec">
+          <div class="h">提示词（本模式独立）</div>
+          <label>想把画面改成什么</label>
+          <textarea data-f="prompt" placeholder="例：同一场景，改成暴雨夜晚，闪电，湿漉漉的地面反光"></textarea>
+          <div class="chips" data-chips="img2img" style="margin-top:9px"></div>
+          <label>排除内容</label>
+          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，低质量"></textarea>
+          <div class="hint">
+            Z-Image 在 CFG 1.0 时很"护图"。想大幅改变内容，把下面的 CFG 提到 3–5。
+          </div>
+        </div>
+
+        <div class="sec collapsible">
+          <div class="h"><span class="cv">▼</span>生成参数</div>
+          <div class="bd">
+            <label>采样步数 <span class="v" data-v="steps">10</span></label>
+            <input type="range" data-f="steps" min="1" max="30" step="1" value="10">
+            <div class="hint" data-est></div>
+            <label>随机种子 <span class="v" data-v="seedlbl">-1</span></label>
+            <div class="row tight">
+              <input type="number" data-f="seed" value="-1">
+              <button class="b sm" data-act="dice">🎲</button>
+              <button class="b sm" data-act="uselast">↺</button>
+            </div>
+            <label>CFG <span class="v" data-v="cfg">1.0</span></label>
+            <input type="range" data-f="cfg" min="0" max="10" step="0.1" value="1">
+            <label>采样器</label>
+            <select data-f="sampler"></select>
+            <label>调度器</label>
+            <select data-f="scheduler"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════ 局部重绘 ══════ -->
+      <div class="pane" data-pane="inpaint">
+        <div class="sec">
+          <div class="h">输入图片</div>
+          <div class="drop" data-drop="inpaint">
+            <span class="ic">🖌</span>
+            <div class="t1">点击选择 / 拖入图片</div>
+            <div class="t2">载入后在右侧大图上直接涂抹</div>
+          </div>
+          <div class="inBox" data-inbox="inpaint">
+            <img class="inThumb" data-inthumb="inpaint" alt="">
+            <div class="inInfo" data-ininfo="inpaint"></div>
+          </div>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm" data-act="useResult" data-arg="inpaint">用当前结果图</button>
+            <button class="b sm" data-act="clearInput" data-arg="inpaint">清除</button>
+          </div>
+          <div class="hint" style="margin-top:9px">
+            载入后，<b style="color:var(--paint)">在右边大图上用鼠标涂抹</b>要重画的区域。
+            没涂的地方会原样保留。
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">重绘设置</div>
+          <label>重绘强度 <span class="v" data-v="strength">0.85</span></label>
+          <input type="range" data-f="strength" min="0.1" max="1" step="0.05" value="0.85">
+          <div class="hint">涂过的区域按这个强度重新生成。换背景这类大改动建议 0.8 以上。</div>
+        </div>
+
+        <div class="sec">
+          <div class="h">提示词（本模式独立）</div>
+          <label>涂抹区域要变成什么</label>
+          <textarea data-f="prompt" placeholder="例：夜晚的星空，银河，流星，深蓝色天幕，繁星点点"></textarea>
+          <div class="chips" data-chips="inpaint" style="margin-top:9px"></div>
+          <label>排除内容</label>
+          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，接缝，不自然"></textarea>
+        </div>
+
+        <div class="sec collapsible">
+          <div class="h"><span class="cv">▼</span>生成参数</div>
+          <div class="bd">
+            <label>采样步数 <span class="v" data-v="steps">10</span></label>
+            <input type="range" data-f="steps" min="1" max="30" step="1" value="10">
+            <div class="hint" data-est></div>
+            <label>随机种子 <span class="v" data-v="seedlbl">-1</span></label>
+            <div class="row tight">
+              <input type="number" data-f="seed" value="-1">
+              <button class="b sm" data-act="dice">🎲</button>
+              <button class="b sm" data-act="uselast">↺</button>
+            </div>
+            <label>CFG <span class="v" data-v="cfg">1.0</span></label>
+            <input type="range" data-f="cfg" min="0" max="10" step="0.1" value="1">
+            <label>采样器</label>
+            <select data-f="sampler"></select>
+            <label>调度器</label>
+            <select data-f="scheduler"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══════ 批量生图 ══════ -->
+      <div class="pane" data-pane="batch">
+
+        <div id="cfgBar"><span class="cdot"></span><span id="cfgTxt">正在连接配置服务…</span><span class="sp"></span><span id="cfgPath"></span></div>
+
+        <!-- 未完成批次 -->
+        <div id="planCard">
+          <div class="pt"><span>⏸</span><span id="planTitle">有未完成的批次</span></div>
+          <div class="pd" id="planDesc"></div>
+          <div class="pr">
+            <button class="b pri" id="planResume">继续这一批</button>
+            <button class="b" id="planAbandon">放弃本批次</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">提示词模板</div>
+          <label>固定字符 + 随机占位符 <span class="v" id="tplStat"></span></label>
+          <div id="tplBox">
+            <textarea data-f="template" placeholder="例：一位女孩，穿{{服装}}，在{{场景}}，{{动作}}"></textarea>
+          </div>
+          <div id="tplErr"></div>
+          <div id="tplTags"></div>
+          <div class="hint">
+            占位符写作 <b style="color:var(--fg2)">{{名称}}</b>，可用中文、不可含空格。
+            同一个占位符在一张图里只会取一个值。
+          </div>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm" id="tplInsert">＋ 插入占位符</button>
+            <button class="b sm" id="tplReset">恢复默认模板</button>
+          </div>
+        </div>
+
+        <!-- ══ 我的模板 ══ -->
+        <div class="sec">
+          <div class="h">我的模板 <span class="v" id="tplLibStat"></span></div>
+          <div class="hint" style="margin-top:0">
+            把当前的<b style="color:var(--fg2)">模板 + 数组 + 张数 + 跳过重复</b>整套存下来，
+            以后一键使用。也可以用「覆盖」把当前内容存回某个已有模板。
+            使用前会先自动备份当前内容，误点了可以撤回。
+          </div>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm pri" id="tplSaveAs">💾 另存为模板</button>
+            <button class="b sm" id="tplUndo" style="display:none">↩ 撤回上次使用</button>
+          </div>
+          <div id="tplLibList"></div>
+        </div>
+
+        <div class="sec">
+          <div class="h">随机取值数组 <span class="v" id="slotStat"></span></div>
+          <div id="slotList"></div>
+          <button class="b sm" id="slotAdd" style="width:100%">＋ 新增占位符</button>
+          <div class="hint">每行一条取值。空数组或找不到数组的占位符会被拦下，不会提交生成。</div>
+        </div>
+
+        <div class="sec">
+          <div class="h">生成设置</div>
+          <div id="comboLine">
+            <span>组合总数</span><b id="comboNum">—</b>
+            <span class="sp"></span>
+            <span id="comboHint"></span>
+          </div>
+
+          <label>批量张数</label>
+          <input type="number" data-f="count" min="1" max="9999" step="1" value="8">
+          <div class="warn" id="countWarn"></div>
+
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
+            <input type="checkbox" data-f="skipDup" id="skipDup" style="width:auto;margin:0">
+            <span>跳过重复组合</span>
+          </label>
+          <div class="hint">
+            勾选后，同一批内不会出现相同的取值组合，张数不能超过组合总数。
+            不勾选则每张独立随机，可能重复。
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">组合预览 <span class="v" id="prevStat"></span></div>
+          <div id="comboPrev"></div>
+          <div class="hint">这是本批将要使用的取值组合（每次点生成重新随机）。</div>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm" id="prevRoll">🎲 重新随机预览</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="h">参数来源</div>
+          <div class="hint" style="margin-top:0">
+            尺寸、步数、CFG、种子、采样器、反向提示词全部沿用
+            <b style="color:var(--fg2)">文生图</b> 面板的设置。
+            点生成时会把当时的参数冻结成快照，之后改文生图不会影响这一批。
+          </div>
+          <div id="frozenInfo" class="hint"></div>
+        </div>
+
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ═══════════ 右栏 ═══════════ -->
+  <section id="right">
+    <div id="stage">
+      <div id="empty">
+        <span class="big">✨</span>
+        <b>还没有图片</b><br>
+        在左边写好提示词，点右下角「生成」
+      </div>
+
+      <div id="imgWrap">
+        <img id="img" alt="结果" title="点击放大">
+        <canvas id="maskLayer"></canvas>
+      </div>
+
+      <div id="maskBar">
+        <button class="b sm on" data-mask="brush">🖌 画笔</button>
+        <button class="b sm" data-mask="erase">🧽 橡皮</button>
+        <span class="sep"></span>
+        <span style="font-size:11.5px;color:var(--fg2)">大小</span>
+        <input type="range" id="brushSize" min="4" max="200" step="2" value="46">
+        <span class="sep"></span>
+        <button class="b sm" data-maskact="invert">反选</button>
+        <button class="b sm" data-maskact="clear">清空</button>
+        <span class="sep"></span>
+        <button class="b sm" data-maskact="useResult" title="把刚才生成的结果当作新输入，继续涂抹">↩ 拿结果继续改</button>
+        <button class="b sm" data-maskact="backToPaint" title="回到输入图继续涂抹" style="display:none">✏️ 继续涂抹</button>
+        <button class="b sm" data-maskact="save">存蒙版</button>
+      </div>
+
+      <div id="overlay">
+        <div class="spin"></div>
+        <div id="ovTxt">生成中…</div>
+        <div id="ovBar"><div id="ovFill"></div></div>
+        <div id="ovSub"></div>
+      </div>
+    </div>
+
+    <div id="bar">
+      <span id="meta"></span>
+      <span class="sp"></span>
+      <button class="b" id="cancel" disabled>取消</button>
+      <button class="b" id="dlAll" style="display:none">⬇ 下载本批</button>
+      <button class="b" id="dl" disabled>⬇ 下载当前</button>
+      <button class="b pri" id="go">✨ 生成</button>
+    </div>
+
+    <div id="batchWrap">
+      <div id="batchHead">
+        <button class="fold" id="batchFold" title="折叠 / 展开本批缩略图">▾</button>
+        <span id="batchTitle">本批</span>
+        <span class="sp"></span>
+        <span id="batchCount"></span>
+      </div>
+      <div id="batchStrip"></div>
+    </div>
+
+    <div id="histWrap">
+      <div id="histHead">
+        <button class="fold" id="histFold" title="折叠 / 展开历史记录">▾</button>
+        <span>历史记录</span>
+        <span class="sp"></span>
+        <span id="histCount"></span>
+        <button class="hbtn" id="histClear" style="padding:2px 8px">清空</button>
+      </div>
+      <div id="hist"></div>
+    </div>
+  </section>
+</main>
+
+<div id="dragHint">松开鼠标载入这张图片</div>
+
+<!-- ═══════════ 点击放大 ═══════════ -->
+<div id="lightbox">
+  <img id="lbImg" alt="放大查看">
+  <div id="lbHint">滚轮缩放 · 拖动平移 · 双击还原 · Esc 关闭</div>
+  <button id="lbClose">✕ 关闭</button>
+  <div id="lbBar">
+    <button id="lbOut">−</button>
+    <span id="lbInfo">100%</span>
+    <button id="lbIn">＋</button>
+    <span class="sp"></span>
+    <button id="lbFit">适应</button>
+    <button id="lbFull">1:1</button>
+    <span class="sp"></span>
+    <span id="lbMeta"></span>
+  </div>
+</div>
+
+<!-- ═══ 指定保存路径（浏览器拿不到真实路径，需要这里补） ═══ -->
+<div id="pathDlg">
+  <div class="pd-box">
+    <div class="pd-head">
+      <b>指定保存目录的完整路径</b>
+      <span class="pd-x" id="pdClose">✕</span>
+    </div>
+    <div class="pd-body">
+      <div class="pd-hint">
+        浏览器的「选择文件夹」出于安全考虑<b>不提供真实路径</b>，所以「打开文件夹」
+        需要在这里指定一次。可以点下面的盘符一层层进，也可以直接粘贴路径。
+        指定后会自动记住。
+      </div>
+      <input type="text" id="pdPath" spellcheck="false" placeholder="例如 D:\Pictures\local-model">
+      <div class="pd-err" id="pdErr"></div>
+      <div class="pd-list" id="pdList"></div>
+      <div class="pd-nav" id="pdNav" style="display:none">
+        <button class="b sm" id="pdUp">↑ 上一级</button>
+        <span id="pdCur" class="pd-cur"></span>
+      </div>
+    </div>
+    <div class="pd-foot">
+      <span class="pd-note" id="pdNote">点盘符进入，选中某层后点「确定」</span>
+      <button class="b sm" id="pdClear" style="display:none">清除路径</button>
+      <button class="b" id="pdCancel">取消</button>
+      <button class="b pri" id="pdOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   本地生图工作台
+   后端：stable-diffusion.cpp 的 sd-server
+   主接口：/sdcpp/v1/img_gen（异步任务）+ /sdcpp/v1/jobs/{id}
+   ══════════════════════════════════════════════════════════════ */
+
+const $  = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const $$m = (sel, m) => $$(`[data-pane="${m}"] ${sel}`);
+const fld = (m, f) => document.querySelector(`[data-pane="${m}"] [data-f="${f}"]`);
+
+/* ── 每个模式独立的状态（这是本次重构的核心） ── */
+const S = {
+  mode: 'txt2img',
+  caps: null,
+  model: '',
+  busy: false,
+  job: null,
+  t0: 0,
+  expect: 0,
+
+  // 结果
+  cur: null,        // {b64, w, h, seed, meta}
+  batch: null,      // 本批全部结果 [{b64,w,h,seed,idx}]
+  hist: [],
+  lastSeed: null,
+
+  // 蒙版
+  maskTool: 'brush',
+  drawing: false,
+  maskDirty: false,
+
+  // 三个模式各自的参数与提示词，互不干扰
+  m: {
+    txt2img: {
+      prompt: '', neg: '', w: 512, h: 768, steps: 10, cfg: 1.0, seed: -1, batch: 1,
+      sampler: 'euler', scheduler: 'discrete'
+    },
+    img2img: {
+      prompt: '', neg: '', w: 768, h: 512, steps: 10, cfg: 1.0, seed: -1,
+      strength: 0.6, sampler: 'euler', scheduler: 'discrete',
+      sizeMode: 'same', input: null, inputName: '', previewInput: false
+    },
+    inpaint: {
+      prompt: '', neg: '', steps: 10, cfg: 1.0, seed: -1,
+      strength: 0.85, sampler: 'euler', scheduler: 'discrete',
+      input: null, inputName: '', previewInput: false
+    },
+    // 批量：只有模板 + 数组 + 张数 + 开关；生成参数继承 txt2img
+    batch: {
+      template: '', slots: [], count: 8, skipDup: true
+    }
+  },
+
+  // ── 批量模块专属运行时状态（不属于任何 pane）──
+  b: {
+    cfgOk: false,        // 配置服务是否可用
+    cfgPath: '',         // 配置文件路径（来自 /health）
+    cfgDirty: false,     // 有未保存改动
+    cfgTimer: null,      // 防抖计时器
+    cfgBusy: false,      // 正在写入
+    preview: [],         // 当前预览的取值组合 [{idx:[...], text}]
+    templates: [],       // 用户模板库 [{id,name,at,template,slots,count,skipDup}]
+    tplBackup: null,     // 恢复模板前的自动备份（只留最近一次）
+    activeTplId: null,   // 当前套用的模板 id（用于列表高亮）
+    plan: null,          // 磁盘上的批次计划
+    frozen: null,        // 本批冻结的参数快照
+    usedCombos: [],      // 本批已用组合键
+    cursor: 0,           // 本批已完成张数
+    planTotal: 0,        // 本批总张数
+    planActive: false,   // 本页是否正在跑这一批
+    comboIdx: null,      // 本批冻结的组合索引表（保证「预览 = 实际生成」）
+    slotNames: null      // 冻结时占位符的名称顺序（与 comboIdx 对应）
+  }
+};
+const P = () => S.m[S.mode];
+
+/* ── 预设 ── */
+const PRESETS = {
+  txt2img: [
+    ['🖼 风景', '夕阳下的海边灯塔，岩石海岸，海浪拍岸，戏剧性的云，电影感光影，超高细节'],
+    ['🌸 二次元', '一个银发少女站在樱花树下，和服，花瓣飘落，柔和逆光，动漫风格，精细'],
+    ['📷 写实', '一只橘猫趴在窗台上晒太阳，晨光，浅景深，85mm 镜头，写实摄影'],
+    ['🎨 插画', '森林深处的小木屋，窗户透出暖黄灯光，积雪的松树，暮色，厚涂插画风格'],
+    ['🏙 赛博', '雨夜的赛博朋克街道，霓虹灯牌，积水倒影，行人撑伞，电影质感'],
+    ['🍜 静物', '一碗热腾腾的日式拉面，溏心蛋，叉烧，葱花，暖色调，美食摄影'],
+    ['🐉 幻想', '巨大的古龙盘踞在云海之上的浮空岛，雷电，史诗感，概念艺术'],
+    ['✏️ 线稿', '一座欧洲老城街道的干净线稿，钢笔速写，黑白，建筑透视准确']
+  ],
+  img2img: [
+    ['🌧 改天气', '同一场景，改成暴雨夜晚，闪电，湿漉漉的地面反光，阴郁气氛'],
+    ['🌅 改光线', '同一场景，改成金色夕阳，暖色调，长长的影子，逆光'],
+    ['❄️ 改季节', '同一场景，改成深冬，覆盖白雪，结冰，冷蓝色调'],
+    ['🎨 改画风', '同一场景，改成水彩画风格，柔和笔触，淡雅配色'],
+    ['🌌 改时间', '同一场景，改成深夜，星空，月光，安静氛围'],
+    ['📷 更写实', '同一场景，照片级写实，细节丰富，自然光影']
+  ],
+  inpaint: [
+    ['🌌 换星空', '夜晚的星空，银河，流星，深蓝色天幕，繁星点点'],
+    ['☁️ 换云', '戏剧性的积雨云，金色夕阳穿透云层，壮阔'],
+    ['🌊 换水面', '平静的湖面，倒影，晨雾，柔和光线'],
+    ['🌸 加花', '盛开的粉色樱花，花瓣飘落，柔和光线'],
+    ['🏔 换远景', '远处连绵的雪山，薄雾，清晨阳光'],
+    ['🌲 加树', '茂密的松树林，深绿色，自然光线']
+  ]
+};
+
+const RATIOS = [
+  ['1:1', 768, 768], ['3:2', 768, 512], ['2:3', 512, 768],
+  ['16:9', 1024, 576], ['9:16', 576, 1024], ['4:3', 896, 672],
+  ['21:9', 1152, 512], ['小图', 512, 512]
+];
+
+/* 模式显示名（查表，避免到处写三元链） */
+const MODE_NAME = { txt2img: '文生图', img2img: '图生图', inpaint: '局部重绘', batch: '批量' };
+
+/* ══════════════ 批量生图 · 出厂默认 ══════════════
+   注意：默认模板里的占位符必须都有非空数组，否则按「找不到数组就硬拦」
+   的规则，用户第一次打开批量面板就会看到红色报错。
+   这份内容与服务端 serve-config.mjs 里的 FACTORY 保持一致。
+
+   ★ 构图原则（实测总结，两轮迭代得来）：
+     身份块很长，会把模型权重压在脸上，默认出图会变成「胸部以上半身」，
+     导致服装和腰部以下的姿势全部体现不出来。
+     解决办法是【构图前置 + 末尾重复】：
+       1) 把「全身构图」写在模板最开头（开头权重最高）
+       2) 结尾再用一句「全身站姿，完整展示服装」加固
+       3) 身份块保持完整（脸的一致性靠它），但不再让它独占权重
+     实测失败例（半身时代）：举起奶茶（杯子裁在画面边缘）、低头挑选水果
+     （水果在底部被裁）、撑伞回头（伞面出画）、靠着栏杆（栏杆不在画面内）。
+     现在的姿势数组一律是【静态站姿】——动态动作（走、蹲、跑）在这套
+     写实风格下容易崩肢体，静态站姿稳定且能展示整套服装。 */
+const BATCH_FACTORY = {
+  template:
+    '全身竖构图，一位20岁中国女孩的全身生活快照，从头到脚完整入镜，' +
+    '人物占画面主体，服装完整清晰可见，全身穿搭都拍进画面。\n' +
+    '固定身份特征，每一张都必须完全一致：左眼下方有一颗小泪痣，' +
+    '细长的单眼皮杏眼、眼尾微微下垂，眉毛细而平直，鼻子小巧挺直、鼻头圆润，嘴唇小巧饱满呈' +
+    '自然粉色，圆润柔和的鹅蛋脸、下巴略短，齐刘海及肩黑发，白皙偏暖的皮肤带自然肌理，身材纤细。\n' +
+    '服装：{{服装}}。场景：{{场景}}。姿势：{{动作}}。\n' +
+    '全身站姿，完整展示服装与身形，双脚和鞋子都在画面内。' +
+    '真实抓拍风格，纪实生活摄影，可用自然光，手机拍摄质感，写实。',
+  slots: [
+    { name: '服装', values: [
+      '黑色皮夹克内搭白T恤配黑色长裤和短靴',
+      '黄色针织马甲配牛仔短裙和白色运动鞋',
+      '灰色超大号连帽卫衣配深色工装裤和帆布鞋',
+      '红色格子衬衫配卡其工装裤和马丁靴',
+      '米色针织开衫配长裙和乐福鞋',
+      '白色衬衫配西装裤和黑色皮鞋'
+    ] },
+    { name: '场景', values: [
+      '夜晚拥挤的夜市街道', '日落时分的海边沙滩', '书店的书架之间',
+      '傍晚的城市天台', '雨天公交站台', '清晨的菜市场'
+    ] },
+    { name: '动作', values: [
+      '自然站立，双手垂在身体两侧，正视镜头',
+      '站直，一手插在口袋里，微微侧身',
+      '站立，双手交握放在身前，神情平静',
+      '微微侧身站立，一手轻搭在腰侧',
+      '双脚并拢站立，一手拨弄耳边的发丝',
+      '站立，双手插兜，肩膀放松，浅笑',
+      '站姿，一只手扶着肩上的包带',
+      '侧身站立，回头看向镜头'
+    ] }
+  ],
+  skipDup: true,
+  count: 8
+};
+
+/* ══════════════ 批量生图 · 占位符引擎 ══════════════
+   语法：{{名称}}，允许中文，禁止空格与花括号。
+   同名占位符在同一次生成内必须取同一个值，否则画面会自相矛盾。 */
+
+const SLOT_NAME_RE = /^[^{}\s]+$/;      // 名称：非空、无空格、无花括号
+const CFG_URL = 'http://127.0.0.1:1235'; // 配置服务地址（serve-config.mjs）
+
+/** 扫描模板里的 {{...}}，返回每个占位符的位置与名称。
+ *  同时标记「未闭合」的 {{ 位置，供实时标红使用。 */
+function scanSlots(tpl){
+  const found = [];
+  const unclosed = [];
+  const re = /\{\{([^{}]*)\}\}/g;
+  let m;
+  while ((m = re.exec(tpl)) !== null){
+    found.push({ name: m[1], start: m.index, end: m.index + m[0].length, raw: m[0] });
+  }
+  // 找未闭合的 {{：去掉已配对的区间后，若还残留 {{ 就是未闭合
+  let rest = tpl;
+  for (let i = found.length - 1; i >= 0; i--){
+    const f = found[i];
+    rest = rest.slice(0, f.start) + ' '.repeat(f.end - f.start) + rest.slice(f.end);
+  }
+  let idx;
+  while ((idx = rest.indexOf('{{')) !== -1){
+    unclosed.push(idx);
+    rest = rest.slice(0, idx) + '  ' + rest.slice(idx + 2);
+  }
+  return { found, unclosed };
+}
+
+/** 校验模板 + 数组，返回错误列表。空数组也算未匹配。 */
+function validateTemplate(tpl, slots){
+  const errors = [];
+  const { found, unclosed } = scanSlots(tpl);
+
+  for (const pos of unclosed){
+    errors.push({ kind: 'unclosed', pos, msg: `第 ${pos} 个字符处有未闭合的 {{，缺少 }}` });
+  }
+
+  const byName = new Map();
+  for (const s of slots){
+    const n = (s.name || '').trim();
+    if (n) byName.set(n, s);
+  }
+
+  const seen = new Set();
+  for (const f of found){
+    const name = f.name.trim();
+    if (!name){
+      errors.push({ kind: 'empty', pos: f.start, msg: `第 ${f.start} 个字符处的 {{}} 里没有名称` });
+      continue;
+    }
+    if (!SLOT_NAME_RE.test(f.name)){
+      errors.push({ kind: 'badname', pos: f.start, msg: `占位符「${f.name}」不合法：名称不能含空格或花括号` });
+      continue;
+    }
+    if (!seen.has(name)){
+      seen.add(name);
+      const s = byName.get(name);
+      if (!s){
+        errors.push({ kind: 'missing', pos: f.start, msg: `占位符「{{${name}}}」没有对应的数组` });
+      } else {
+        const vals = (s.values || []).filter(v => String(v).trim() !== '');
+        if (!vals.length){
+          errors.push({ kind: 'emptyarr', pos: f.start, msg: `占位符「{{${name}}}」的数组是空的` });
+        }
+      }
+    }
+  }
+
+  // 反向：定义了数组但模板里没用到（只提示，不算错误）
+  const usedNames = new Set(found.map(f => f.name.trim()));
+  const unused = slots.map(s => (s.name || '').trim()).filter(n => n && !usedNames.has(n));
+
+  return { errors, unused, found, unclosed };
+}
+
+/** 取某个占位符的候选值（已过滤空行）。 */
+function slotValues(slots, name){
+  const s = slots.find(x => (x.name || '').trim() === name);
+  if (!s) return [];
+  return (s.values || []).map(v => String(v).trim()).filter(v => v !== '');
+}
+
+/** 组合总数 = 各数组长度之积。任一为空 → 0。 */
+function comboCount(slots, tpl){
+  const { found } = scanSlots(tpl || '');
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  if (!names.length) return 0;
+  let n = 1;
+  for (const name of names){
+    const vals = slotValues(slots, name);
+    if (!vals.length) return 0;
+    n *= vals.length;
+  }
+  return n;
+}
+
+/** 用一组取值渲染最终提示词。combo 是 {名称: 值} 映射。 */
+function renderPrompt(tpl, combo){
+  return tpl.replace(/\{\{([^{}]*)\}\}/g, (all, name) => {
+    const key = name.trim();
+    return Object.prototype.hasOwnProperty.call(combo, key) ? combo[key] : all;
+  });
+}
+
+/** 随机取一组组合。skipDup 时避开 used 里出现过的组合键。 */
+function pickCombo(slots, tpl, used, skipDup){
+  const { found } = scanSlots(tpl || '');
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  if (!names.length) return null;
+
+  const pools = names.map(n => slotValues(slots, n));
+  if (pools.some(p => !p.length)) return null;
+
+  const total = pools.reduce((a, p) => a * p.length, 1);
+
+  // 不跳过重复：直接随机
+  if (!skipDup){
+    const idxs = pools.map(p => Math.floor(Math.random() * p.length));
+    return buildCombo(names, pools, idxs);
+  }
+
+  // 跳过重复：先算出没用过的组合键，再从中随机挑
+  const usedSet = new Set(used || []);
+  const free = [];
+  for (let k = 0; k < total; k++){
+    let rem = k;
+    const idxs = [];
+    for (const p of pools){
+      idxs.push(rem % p.length);
+      rem = Math.floor(rem / p.length);
+    }
+    const key = idxs.join('|');
+    if (!usedSet.has(key)) free.push(idxs);
+  }
+  if (!free.length) return null;           // 组合已用尽
+  const idxs = free[Math.floor(Math.random() * free.length)];
+  return buildCombo(names, pools, idxs);
+}
+
+function buildCombo(names, pools, idxs){
+  const map = {};
+  names.forEach((n, i) => { map[n] = pools[i][idxs[i]]; });
+  return { map, idxs, key: idxs.join('|') };
+}
+
+/* ══════════════ 耗时预估 ══════════════
+   本机实测（Radeon 780M · Z-Image Turbo Q4_K · euler/discrete）：
+
+   文生图 8 步：
+     512×512   0.262 MP  →  41.1 s
+     640×640   0.410 MP  →  70.2 s
+     768×768   0.590 MP  → 113.7 s
+     1024×1024 1.049 MP  → 277.1 s
+
+   关键：每步耗时随像素数近似【二次增长】，不是线性。
+   拟合：每步 ≈ 0.796 + 9.717·MP + 21.165·MP²
+   另有约 3 秒固定开销（模型加载 / 文本编码）。
+   批量线性叠加（4 张 768×512 实测 251.9s，预估 255.5s）。
+
+   图生图另需 VAE 编码输入图，约 14 秒 / 百万像素（768×512 实测 ≈5.5s）。
+   重绘强度不按比例线性缩短，实测（768×512 / 8 步）：
+     强度 0.3 → 27.9s   0.6 → 41.2s   0.9 → 61.9s
+   反推「等效步数」占比 ≈ 0.218 + 0.119·s + 0.663·s²，s=1 时正好为 1.0。
+   按此模型三项误差均 <2%。 */
+const T_FIXED    = 3.0;    // 固定开销（秒）
+const T_VAE_MP   = 14.0;   // 图生图：VAE 编码输入图，秒/百万像素
+const A = 0.796, B = 9.717, C = 21.165;
+
+/* 纯采样耗时（已含步数） */
+function sampleCost(steps, w, h){
+  const mp = (w * h) / 1e6;
+  return steps * (A + B * mp + C * mp * mp);
+}
+
+/* 重绘强度 → 等效步数占比。s=1 时返回 1（不损失精度） */
+function strengthFactor(s){
+  s = Math.max(0, Math.min(1, +s));
+  return 0.218 + 0.119 * s + 0.663 * s * s;
+}
+
+/* 完整预估
+   opt: { batch, img2img, strength } */
+function estTime(steps, w, h, opt){
+  opt = opt || {};
+  const n = Math.max(1, opt.batch || 1);
+  const eff = (opt.strength != null && opt.strength < 1)
+            ? steps * strengthFactor(opt.strength)
+            : steps;
+  let t = T_FIXED + sampleCost(eff, w, h) * n;
+  if (opt.img2img) t += T_VAE_MP * (w * h) / 1e6;
+  return t;
+}
+
+/* ══════════════ 工具函数 ══════════════ */
+function setStat(t, cls){
+  $('#stat').textContent = t;
+  $('#dot').className = cls || '';
+}
+function b64ToBlob(b64, type){
+  const bin = atob(stripDataUri(b64));
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Blob([u8], {type: type || 'image/png'});
+}
+
+/* 服务端可能返回：字符串、"data:image/png;base64,xxx"、或 {b64_json:"..."}
+   统一取出纯 base64；取不到返回 '' */
+function stripDataUri(s){
+  s = String(s || '').trim();
+  const i = s.indexOf('base64,');
+  return i >= 0 ? s.slice(i + 7) : s;
+}
+function normB64(x){
+  if (!x) return '';
+  if (typeof x === 'string') return stripDataUri(x);
+  for (const k of ['b64_json', 'b64', 'image', 'data', 'base64']){
+    if (typeof x[k] === 'string' && x[k]) return stripDataUri(x[k]);
+  }
+  return '';
+}
+function bytes(n){
+  return n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(2)+' MB';
+}
+function secs(s){
+  s = Math.round(s);
+  return s < 60 ? s+' 秒' : Math.floor(s/60)+' 分 '+(s%60)+' 秒';
+}
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function tsName(ext){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
+}
+
+/* ══════════════ 模式切换 ══════════════ */
+function switchMode(m){
+  if (m === S.mode) return;
+  savePane(S.mode);            // 先把当前面板写回状态
+  S.mode = m;
+  $$('#tabs .tab').forEach(t => t.classList.toggle('on', t.dataset.mode === m));
+  $$('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === m));
+  loadPane(m);                 // 再把新面板填上
+
+  // 进入重绘模式：默认显示输入图供涂抹
+  if (m === 'inpaint' && S.m.inpaint.input) S.m.inpaint.previewInput = true;
+  const ur = $('[data-maskact="useResult"]'), bp = $('[data-maskact="backToPaint"]');
+  if (ur) ur.style.display = '';
+  if (bp) bp.style.display = 'none';
+
+  refreshStage();
+}
+
+/* 把 DOM 里的值读回 S.m */
+function savePane(m){
+  if (m === 'batch'){ saveBatchPane(); return; }
+  const s = S.m[m];
+  ['prompt','neg','seed','sampler','scheduler','sizeMode'].forEach(f => {
+    const el = fld(m, f); if (el) s[f] = el.value;
+  });
+  ['w','h','steps','cfg','batch','strength'].forEach(f => {
+    const el = fld(m, f); if (el) s[f] = +el.value;
+  });
+}
+/* 把 S.m 填进 DOM */
+function loadPane(m){
+  if (m === 'batch'){ loadBatchPane(); return; }
+  const s = S.m[m];
+  ['prompt','neg','seed','sampler','scheduler','sizeMode'].forEach(f => {
+    const el = fld(m, f); if (el && s[f] !== undefined) el.value = s[f];
+  });
+  ['w','h','steps','cfg','batch','strength'].forEach(f => {
+    const el = fld(m, f); if (el && s[f] !== undefined) el.value = s[f];
+  });
+  syncLabels(m);
+  if (m !== 'txt2img') refreshInputUI(m);
+}
+
+/* 刷新某个面板的数值标签 */
+function syncLabels(m){
+  if (m === 'batch'){ syncBatchLabels(); return; }
+  const s = S.m[m];
+  const put = (k, v) => { const e = $$m(`[data-v="${k}"]`, m)[0]; if (e) e.textContent = v; };
+  put('w', s.w); put('h', s.h); put('steps', s.steps);
+  put('cfg', (+s.cfg).toFixed(1)); put('batch', s.batch);
+  put('strength', (+s.strength).toFixed(2));
+  put('seedlbl', s.seed);
+  const est = $$m('[data-est]', m)[0];
+  if (est){
+    const o = estOpts(m);
+    const t = estTime(s.steps, o.w, o.h, o);
+    const n = Math.max(1, o.batch || 1);
+    const bits = [`${s.steps} 步`, `${o.w}×${o.h}`];
+    if (o.strength != null && o.strength < 1) bits.push(`强度 ${(+o.strength).toFixed(2)}`);
+    if (n > 1) bits.push(`串行 ${n} 张 · 每张约 ${secs(t)}`);
+    est.textContent = `预计耗时：约 ${secs(t * n)}（${bits.join(' / ')}）`;
+  }
+  checkWH(m);
+  if (m === 'txt2img') markRatio();
+  const sb = $$m('[data-sizebox]', m)[0];
+  if (sb) sb.style.display = s.sizeMode === 'custom' ? 'flex' : 'none';
+}
+
+/* 算出某个模式当前的「实际输出尺寸 / 批量 / 强度」，供预估使用 */
+function estOpts(m){
+  const s = S.m[m];
+  // 批量继承文生图参数，预估也按文生图算（逐张串行，所以 batch=1）
+  if (m === 'txt2img' || m === 'batch'){
+    const t = S.m.txt2img;
+    return { w: t.w, h: t.h, batch: m === 'batch' ? 1 : (t.batch || 1) };
+  }
+  const useCustom = s.sizeMode === 'custom';
+  const w = useCustom ? s.w : (s.input?.w || s.w);
+  const h = useCustom ? s.h : (s.input?.h || s.h);
+  return { w, h, batch: 1, img2img: true, strength: +s.strength };
+}
+
+function checkWH(m){
+  if (m === 'batch') return;              // 批量面板没有尺寸控件
+  const s = S.m[m];
+  const box = $$m('[data-warn="wh"]', m)[0];
+  if (!box) return;
+  const [w, h] = m === 'txt2img' ? [s.w, s.h]
+               : (s.sizeMode === 'custom' ? [s.w, s.h] : (s.input ? [s.input.w, s.input.h] : [s.w, s.h]));
+  const mp = w*h/1e6;
+  let msg = '';
+  if (w % 64 || h % 64) msg = `⚠ ${w}×${h} 不是 64 的倍数，会报错。`;
+  else if (mp > 1.05) msg = `⚠ ${w}×${h} = ${mp.toFixed(2)} MP，超过本机上限（1024×1024），可能显存不足。`;
+  else if (mp > 0.85) msg = `注意：${mp.toFixed(2)} MP 接近上限，耗时会明显变长。`;
+  box.textContent = msg;
+  box.classList.toggle('show', !!msg);
+}
+
+function markRatio(){
+  const s = S.m.txt2img;
+  $$('[data-ratios="txt2img"] .chip').forEach(c => {
+    c.classList.toggle('on', +c.dataset.w === s.w && +c.dataset.h === s.h);
+  });
+}
+
+/* ══════════════ 初始化 UI ══════════════ */
+function buildChips(){
+  ['txt2img','img2img','inpaint'].forEach(m => {
+    const box = $(`[data-chips="${m}"]`);
+    if (!box) return;
+    box.innerHTML = '';
+    (PRESETS[m] || []).forEach(([label, text]) => {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = label;
+      c.onclick = () => {
+        const ta = fld(m, 'prompt');
+        ta.value = text;
+        S.m[m].prompt = text;
+        [...box.children].forEach(x => x.classList.remove('on'));
+        c.classList.add('on');
+        ta.focus();
+      };
+      box.appendChild(c);
+    });
+  });
+
+  const rb = $('[data-ratios="txt2img"]');
+  rb.innerHTML = '';
+  RATIOS.forEach(([label, w, h]) => {
+    const c = document.createElement('span');
+    c.className = 'chip';
+    c.textContent = label;
+    c.dataset.w = w; c.dataset.h = h;
+    c.onclick = () => {
+      S.m.txt2img.w = w; S.m.txt2img.h = h;
+      fld('txt2img','w').value = w;
+      fld('txt2img','h').value = h;
+      syncLabels('txt2img');
+    };
+    rb.appendChild(c);
+  });
+}
+
+function fillSelects(){
+  if (!S.caps) return;
+  ['txt2img','img2img','inpaint'].forEach(m => {
+    const smp = fld(m, 'sampler'), sch = fld(m, 'scheduler');
+    if (!smp || smp.options.length) return;
+    (S.caps.samplers || []).forEach(n => smp.add(new Option(n, n)));
+    (S.caps.schedulers || []).forEach(n => sch.add(new Option(n, n)));
+    smp.value = S.m[m].sampler || 'euler';
+    sch.value = S.m[m].scheduler || 'discrete';
+  });
+}
+
+/* ══════════════ 事件绑定 ══════════════ */
+$$('#tabs .tab').forEach(t => t.onclick = () => switchMode(t.dataset.mode));
+
+$$('.sec.collapsible > .h').forEach(h => h.onclick = () => h.parentElement.classList.toggle('cl'));
+
+// 滑块 / 输入 实时同步
+document.addEventListener('input', e => {
+  const el = e.target.closest('[data-f]');
+  if (!el) return;
+  const pane = el.closest('.pane');
+  if (!pane) return;
+  const m = pane.dataset.pane;
+  const f = el.dataset.f;
+  const s = S.m[m];
+  s[f] = el.type === 'range' || el.type === 'number' ? +el.value || 0 : el.value;
+  if (f === 'seed') s.seed = el.value;
+  syncLabels(m);
+});
+// 下拉框
+document.addEventListener('change', e => {
+  const el = e.target.closest('select[data-f]');
+  if (!el) return;
+  const m = el.closest('.pane').dataset.pane;
+  S.m[m][el.dataset.f] = el.value;
+  syncLabels(m);
+});
+
+// 通用按钮
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-act]');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const m = btn.closest('.pane') ? btn.closest('.pane').dataset.pane : S.mode;
+  const s = S.m[m];
+
+  if (act === 'swap'){
+    [s.w, s.h] = [s.h, s.w];
+    fld(m,'w').value = s.w; fld(m,'h').value = s.h;
+    syncLabels(m);
+  }
+  if (act === 'resetwh'){
+    s.w = 768; s.h = 768;
+    fld(m,'w').value = 768; fld(m,'h').value = 768;
+    syncLabels(m);
+  }
+  if (act === 'dice'){
+    s.seed = Math.floor(Math.random()*2147483647);
+    fld(m,'seed').value = s.seed;
+    syncLabels(m);
+  }
+  if (act === 'uselast'){
+    if (S.lastSeed != null){
+      s.seed = S.lastSeed;
+      fld(m,'seed').value = S.lastSeed;
+      syncLabels(m);
+    }
+  }
+  if (act === 'useResult'){
+    if (!S.cur) { alert('还没有生成过图片。'); return; }
+    setInput(m, S.cur.b64, `当前结果图 ${S.cur.w}×${S.cur.h}`);
+  }
+  if (act === 'clearInput'){
+    setInput(m, null, '');
+  }
+});
+
+/* ══════════════ 输入图管理 ══════════════ */
+function setInput(m, b64, name){
+  const s = S.m[m];
+  s.input = b64 ? {b64, w: 0, h: 0} : null;
+  s.inputName = name || '';
+  s.previewInput = !!b64;      // true = 大图显示输入图；false = 显示生成结果
+
+  if (b64){
+    const im = new Image();
+    im.onload = () => {
+      s.input.w = im.naturalWidth;
+      s.input.h = im.naturalHeight;
+      refreshInputUI(m);
+      syncLabels(m);
+      refreshStage();          // 尺寸拿到后必须重刷，否则蒙版画布尺寸对不上
+    };
+    im.src = 'data:image/png;base64,' + b64;
+  }
+  // 换了输入图，旧蒙版作废
+  if (m === 'inpaint'){ cx.clearRect(0, 0, cvEl.width, cvEl.height); S.maskDirty = false; }
+
+  refreshInputUI(m);
+  syncLabels(m);
+  refreshStage();
+}
+
+function refreshInputUI(m){
+  const s = S.m[m];
+  const box = document.querySelector(`[data-inbox="${m}"]`);
+  const drop = document.querySelector(`[data-drop="${m}"]`);
+  const th = document.querySelector(`[data-inthumb="${m}"]`);
+  const info = document.querySelector(`[data-ininfo="${m}"]`);
+  if (!box) return;
+
+  if (s.input && s.input.b64){
+    box.classList.add('show');
+    drop.style.display = 'none';
+    th.src = 'data:image/png;base64,' + s.input.b64;
+    info.innerHTML = `<b>${s.input.w||'?'} × ${s.input.h||'?'}</b><br>${s.inputName || '已载入'}`;
+  } else {
+    box.classList.remove('show');
+    drop.style.display = '';
+  }
+}
+
+function pickFile(m){
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = () => {
+    const f = inp.files[0];
+    if (f) readImageFile(f, m);
+  };
+  inp.click();
+}
+
+function readImageFile(file, m){
+  const fr = new FileReader();
+  fr.onload = () => {
+    // 统一转成 PNG base64（服务端接受 png/jpeg，但统一更省心）
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = im.naturalWidth; c.height = im.naturalHeight;
+      c.getContext('2d').drawImage(im, 0, 0);
+      const b64 = c.toDataURL('image/png').split(',')[1];
+      setInput(m, b64, file.name);
+    };
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(file);
+}
+
+$$('.drop').forEach(d => {
+  const m = d.dataset.drop;
+  d.onclick = () => pickFile(m);
+  d.addEventListener('dragover', e => { e.preventDefault(); d.classList.add('over'); });
+  d.addEventListener('dragleave', () => d.classList.remove('over'));
+  d.addEventListener('drop', e => {
+    e.preventDefault(); d.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f && f.type.startsWith('image/')) readImageFile(f, m);
+  });
+});
+
+// 整页拖拽
+let dragDepth = 0;
+window.addEventListener('dragenter', e => {
+  if (![...e.dataTransfer.types].includes('Files')) return;
+  if (S.mode === 'txt2img' || S.mode === 'batch') return;   // 无输入图
+  dragDepth++;
+  $('#dragHint').classList.add('show');
+});
+window.addEventListener('dragleave', () => {
+  if (--dragDepth <= 0) { dragDepth = 0; $('#dragHint').classList.remove('show'); }
+});
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault();
+  dragDepth = 0; $('#dragHint').classList.remove('show');
+  if (S.mode === 'txt2img' || S.mode === 'batch') return;
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) readImageFile(f, S.mode);
+});
+
+// 粘贴图片
+window.addEventListener('paste', e => {
+  if (S.mode === 'txt2img' || S.mode === 'batch') return;
+  const it = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+  if (it) readImageFile(it.getAsFile(), S.mode);
+});
+
+/* ══════════════ 蒙版画布（贴在图上） ══════════════ */
+const cvEl = $('#maskLayer');
+const cx = cvEl.getContext('2d');
+
+function sizeMaskCanvas(w, h){
+  cvEl.width = w;
+  cvEl.height = h;
+  cx.clearRect(0, 0, w, h);
+  S.maskDirty = false;
+}
+
+/** 把蒙版画布对齐到图片「实际渲染」的那块矩形。
+ *  图片是 object-fit:contain，会等比缩放并居中，四周留白不算图。
+ *  蒙版必须盖在真实图像区域上，画笔坐标才对得上。
+ *  触发时机：刷新主图后、窗口尺寸变化后。 */
+function syncMaskLayerToImage(){
+  const im = $('#img');
+  const wrap = $('#imgWrap');
+  if (!wrap.classList.contains('show') || !im.naturalWidth || !im.naturalHeight){
+    cvEl.style.left = cvEl.style.top = '0px';
+    cvEl.style.width = cvEl.style.height = '0px';
+    return;
+  }
+  const box = wrap.getBoundingClientRect();
+  const nw = im.naturalWidth, nh = im.naturalHeight;
+  // contain：取较小的缩放比
+  const k = Math.min(box.width / nw, box.height / nh);
+  const dw = nw * k, dh = nh * k;
+  cvEl.style.left   = ((box.width  - dw) / 2) + 'px';
+  cvEl.style.top    = ((box.height - dh) / 2) + 'px';
+  cvEl.style.width  = dw + 'px';
+  cvEl.style.height = dh + 'px';
+}
+
+function maskPoint(e){
+  const r = cvEl.getBoundingClientRect();
+  return [
+    (e.clientX - r.left) / r.width  * cvEl.width,
+    (e.clientY - r.top)  / r.height * cvEl.height
+  ];
+}
+function paintMask(e){
+  const [x, y] = maskPoint(e);
+  const r = cvEl.getBoundingClientRect();
+  const rad = (+$('#brushSize').value) / 2 * (cvEl.width / Math.max(r.width, 1));
+  cx.globalCompositeOperation = S.maskTool === 'erase' ? 'destination-out' : 'source-over';
+  cx.fillStyle = 'rgba(255,59,48,.85)';
+  cx.beginPath(); cx.arc(x, y, rad, 0, 7); cx.fill();
+  cx.globalCompositeOperation = 'source-over';
+  S.maskDirty = true;
+}
+
+cvEl.addEventListener('pointerdown', e => {
+  if (S.mode !== 'inpaint' || !S.m.inpaint.input) return;
+  S.drawing = true; cvEl.setPointerCapture(e.pointerId); paintMask(e);
+});
+cvEl.addEventListener('pointermove', e => { if (S.drawing) paintMask(e); });
+cvEl.addEventListener('pointerup', () => S.drawing = false);
+cvEl.addEventListener('pointercancel', () => S.drawing = false);
+
+$$('#maskBar [data-mask]').forEach(b => b.onclick = () => {
+  S.maskTool = b.dataset.mask;
+  $$('#maskBar [data-mask]').forEach(x => x.classList.toggle('on', x === b));
+});
+
+$$('#maskBar [data-maskact]').forEach(b => b.onclick = () => {
+  const a = b.dataset.maskact;
+  if (a === 'clear'){
+    cx.clearRect(0, 0, cvEl.width, cvEl.height);
+    S.maskDirty = false;
+  }
+  if (a === 'invert'){
+    const d = cx.getImageData(0, 0, cvEl.width, cvEl.height);
+    const p = d.data;
+    let any = false;
+    for (let i = 0; i < p.length; i += 4){
+      if (p[i+3] > 20){ p[i+3] = 0; }
+      else { p[i] = 255; p[i+1] = 59; p[i+2] = 48; p[i+3] = 255; any = true; }
+    }
+    cx.putImageData(d, 0, 0);
+    S.maskDirty = any;
+  }
+  if (a === 'save'){
+    const b64 = exportMask();
+    if (!b64) { alert('还没有涂抹任何区域。'); return; }
+    download(b64ToBlob(b64), tsName('mask.png'));
+  }
+  if (a === 'useResult'){
+    // 把刚生成的结果当成新输入，接着涂接着改
+    if (!S.cur) { alert('还没有生成过图片。'); return; }
+    setInput('inpaint', S.cur.b64, `结果图 ${S.cur.w}×${S.cur.h}`);
+    $('[data-maskact="useResult"]').style.display = 'none';
+    $('[data-maskact="backToPaint"]').style.display = '';
+    return;
+  }
+  if (a === 'backToPaint'){
+    S.m.inpaint.previewInput = true;
+    $('[data-maskact="useResult"]').style.display = '';
+    $('[data-maskact="backToPaint"]').style.display = 'none';
+    refreshStage();
+    return;
+  }
+  refreshStage();
+});
+
+/* 导出成「原图尺寸」的黑白蒙版：白=重画，黑=保留 */
+function exportMask(){
+  if (!S.maskDirty) return null;
+  const w = cvEl.width, h = cvEl.height;
+  const d = cx.getImageData(0, 0, w, h).data;
+  let painted = 0;
+  const tmp = document.createElement('canvas');
+  tmp.width = w; tmp.height = h;
+  const tc = tmp.getContext('2d');
+  const td = tc.createImageData(w, h);
+  for (let i = 0; i < d.length; i += 4){
+    const on = d[i+3] > 20;
+    if (on) painted++;
+    td.data[i] = td.data[i+1] = td.data[i+2] = on ? 255 : 0;
+    td.data[i+3] = 255;
+  }
+  if (!painted) return null;
+  tc.putImageData(td, 0, 0);
+
+  const src = S.m.inpaint.input;
+  const tw = src?.w || w, th = src?.h || h;
+  if (tw === w && th === h) return tmp.toDataURL('image/png').split(',')[1];
+
+  const out = document.createElement('canvas');
+  out.width = tw; out.height = th;
+  const oc = out.getContext('2d');
+  oc.imageSmoothingEnabled = true;
+  oc.drawImage(tmp, 0, 0, tw, th);
+  return out.toDataURL('image/png').split(',')[1];
+}
+
+/* ══════════════ 舞台刷新 ══════════════ */
+function refreshStage(){
+  const m = S.mode;
+  const s = S.m[m];
+  const wrap = $('#imgWrap');
+  const img = $('#img');
+  const empty = $('#empty');
+  const showImg = b64 => { img.src = 'data:image/png;base64,' + b64; wrap.classList.add('show'); empty.style.display = 'none'; syncMaskLayerToImage(); };
+  const showEmpty = () => { wrap.classList.remove('show'); empty.style.display = ''; };
+
+  // ── 局部重绘：蒙版层贴在输入图上 ──
+  if (m === 'inpaint'){
+    const has = !!(s.input && s.input.b64);
+    $('#maskBar').classList.toggle('show', has);
+    const painting = s.previewInput && has;
+    cvEl.classList.toggle('on', !!painting);
+    $('#maskBar').querySelector('[data-maskact="useResult"]').disabled = !S.cur;
+    $('#maskBar').querySelector('[data-maskact="clear"]').disabled = !painting;
+    $('#maskBar').querySelector('[data-maskact="invert"]').disabled = !painting;
+    $('#maskBar').querySelector('#brushSize').disabled = !painting;
+
+    if (painting){
+      showImg(s.input.b64);
+      if (cvEl.width !== s.input.w || cvEl.height !== s.input.h) sizeMaskCanvas(s.input.w, s.input.h);
+      return;
+    }
+    if (S.cur){ showImg(S.cur.b64); return; }          // 生成完先看结果
+    if (s.input && s.input.b64){ showImg(s.input.b64); return; }
+    showEmpty();
+    return;
+  }
+
+  $('#maskBar').classList.remove('show');
+  cvEl.classList.remove('on');
+
+  // ── 图生图：选过输入图就先显示它 ──
+  if (m === 'img2img' && s.previewInput && s.input && s.input.b64){ showImg(s.input.b64); return; }
+
+  // ── 其余：显示当前结果 ──
+  if (S.cur){ showImg(S.cur.b64); return; }
+  showEmpty();
+}
+
+/* ══════════════ 连接后端 ══════════════ */
+async function boot(){
+  setStat('正在连接服务端…');
+  try {
+    const r = await fetch('/sdcpp/v1/capabilities');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    S.caps = await r.json();
+    S.model = S.caps.model?.stem || '(未知)';
+    fillSelects();
+    const lim = S.caps.limits || {};
+    setStat(`已连接 · ${S.model} · 尺寸上限 ${lim.max_width}×${lim.max_height} · 批量 ≤ ${lim.max_batch_count}`, 'on');
+    $('#go').disabled = false;
+  } catch (e){
+    setStat('连不上服务端 —— 请确认 sd-server.exe 正在运行。', 'off');
+    $('#go').disabled = true;
+  }
+  // 配置服务（批量模块用）。失败只降级，不影响上面已连上的主功能。
+  await bootConfig();
+}
+
+/** 连接配置服务并载入批量设置。不可用时降级为「不保存」。 */
+async function bootConfig(){
+  cfgSetStatus('busy', '正在连接配置服务…');
+  try {
+    const h = await fetch(CFG_URL + '/health', { cache: 'no-store' });
+    if (h.ok){
+      const j = await h.json();
+      S.b.cfgPath = j.configPath || '';
+    }
+  } catch (_){ /* health 失败下面还会试 /config */ }
+
+  const c = await cfgLoad();
+
+  if (!c){
+    cfgSetStatus('err', '配置服务未启动 —— 批量设置不会被保存（主功能不受影响）', '');
+  } else if (S.b.cfgPath){
+    cfgSetStatus('ok', '配置服务已连接 · 改动自动保存', S.b.cfgPath);
+  } else {
+    cfgSetStatus('ok', '配置服务已连接 · 改动自动保存', '');
+  }
+
+  if (S.mode === 'batch') loadBatchPane();
+  else { renderSlotEditor(); renderTplTags(); }
+  // ★ 模板库与当前面板无关，任何模式下都要渲染一次，
+  //   否则「恢复上次在批量页刷新」以外的场景下列表会是空的，切到批量页才补上。
+  renderTplLib();
+  updateUndoBtn();
+
+  // 有未完成的批次 → 提示，但不自动跑。
+  // 注意顺序：renderPlanCard() 在「模板已被改过」时会把 plan 置空，
+  // 所以必须先渲染、再重新取一次 plan 判断，否则会读到 null。
+  renderPlanCard();
+  const p = S.b.plan;
+  if (p && p.status !== 'done' && p.cursor < p.total){
+    setStat(`检测到未完成的批次（${p.cursor}/${p.total}），可在「批量」里继续。`, 'busy');
+  }
+}
+
+/* ══════════════ 保存到目录（File System Access API） ══════════════
+   浏览器不允许网页自己决定往哪写，必须由用户点一次「选择目录」授权。
+   授权后句柄可以记住（IndexedDB），下次打开免选择——但浏览器重启后
+   可能仍需再点一次确认。 */
+const DIR = {
+  handle: null,
+  auto: true,          // ★ 默认开启：只要选了目录就自动存，不用再点一次
+  supported: typeof window !== 'undefined' && 'showDirectoryPicker' in window,
+  // ★ 真实磁盘路径：浏览器的 File System Access API 只给 handle.name（文件夹名），
+  //   永远不给完整路径。所以「在资源管理器打开」必须依赖用户手填一次真实路径，
+  //   再由配置服务（Node 进程）去 spawn explorer.exe。
+  realPath: '',        // 用户填写的真实路径，落盘保存
+  serverOk: null       // 配置服务是否支持「打开文件夹」
+};
+
+const IDB_NAME = 'sdstudio', IDB_STORE = 'handles';
+
+function idb(){
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(IDB_NAME, 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore(IDB_STORE);
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function idbSet(k, v){
+  try {
+    const db = await idb();
+    await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(v, k);
+      tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+  } catch (e) { /* 无痕模式等，忽略 */ }
+}
+async function idbGet(k){
+  try {
+    const db = await idb();
+    return await new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const rq = tx.objectStore(IDB_STORE).get(k);
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => rej(rq.error);
+    });
+  } catch (e) { return null; }
+}
+async function idbDel(k){
+  try {
+    const db = await idb();
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(k);
+  } catch (e) {}
+}
+
+function updateDirUI(){
+  const b = $('#btnDir'), a = $('#btnAuto');
+  if (!DIR.supported){
+    b.textContent = '📁 浏览器不支持自动存盘';
+    b.disabled = true;
+    a.disabled = true;
+    a.title = '当前浏览器不支持 File System Access API，请用 Chrome / Edge';
+    return;
+  }
+  b.textContent = DIR.handle ? `📁 ${DIR.handle.name}` : '📁 保存目录：未设置';
+  b.classList.toggle('set', !!DIR.handle);
+  b.title = DIR.handle
+    ? `当前保存目录：${DIR.handle.name}。点这里可以换一个文件夹。`
+    : '选择生成结果自动保存的目录（之后每张生成完自动写入）';
+  a.textContent = '自动保存：' + (DIR.auto ? '开' : '关');
+  a.classList.toggle('on', DIR.auto);
+  a.disabled = !DIR.handle;
+  a.title = DIR.handle ? '生成完成后自动写入该目录' : '请先选择保存目录';
+
+  // ★ 「打开文件夹」：有真实路径才可用。没有时点一下引导填写。
+  const op = $('#btnOpen');
+  if (op){
+    const has = !!DIR.realPath;
+    op.classList.toggle('set', has);
+    op.textContent = has ? '🗂️ 打开文件夹' : '🗂️ 指定路径';
+    op.title = has
+      ? `左键：在资源管理器打开 ${DIR.realPath}\n右键：更改保存目录的真实路径`
+      : '浏览器的「选择文件夹」不提供真实路径。点这里指定一次，之后就能一键打开。';
+  }
+
+  // 下载按钮文案跟随目录状态
+  const da = $('#dlAll'), d1 = $('#dl');
+  if (da){
+    da.textContent = DIR.handle ? '📁 本批存到目录' : '⬇ 下载本批';
+    da.title = DIR.handle
+      ? `把本批 ${S.batch ? S.batch.length : 0} 张全部写入「${DIR.handle.name}」（不弹保存框）`
+      : `把本批 ${S.batch ? S.batch.length : 0} 张逐张下载到浏览器默认下载文件夹`;
+  }
+  if (d1){
+    d1.textContent = DIR.handle ? '📁 当前存到目录' : '⬇ 下载当前';
+    d1.title = DIR.handle
+      ? `只把当前这张写入「${DIR.handle.name}」`
+      : '只下载当前这张';
+  }
+}
+
+/* ══════════ 在资源管理器打开保存目录 ══════════
+   浏览器永远拿不到真实磁盘路径，所以这一步交给配置服务：
+     POST /savedir   登记/清除真实路径
+     POST /open-dir  让服务 spawn explorer.exe
+     GET  /drives    盘符列表（弹窗浏览起点）
+     GET  /list-dir  列出某目录下的子文件夹
+   服务不可用时降级为纯提示，不影响主功能。 */
+
+/** 把真实路径报给服务端登记；传空串表示清除。
+ *  ★ 只有服务端确认接受后才写进 DIR.realPath —— 否则被拒的路径会留在本地，
+ *    按钮会显示成「打开文件夹」，点下去必然失败，很误导。 */
+async function reportRealPath(p){
+  if (!p){
+    DIR.realPath = '';
+    // ★ 同时通知服务端清掉它记的 lastSaveDir，
+    //   否则换目录后服务端还留着旧路径，容易被误用。
+    try {
+      await fetch(CFG_URL + '/savedir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dir: '', clear: true })
+      });
+    } catch { /* 服务没开就算了，本地已经清干净 */ }
+    return { ok: true, skipped: true };
+  }
+  try {
+    const r = await fetch(CFG_URL + '/savedir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir: p })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok){
+      return { ok: false, code: j.code || 'http', error: j.error || `HTTP ${r.status}` };
+    }
+    DIR.realPath = j.dir || p;      // 服务返回规范化后的路径
+    DIR.serverOk = true;
+    return { ok: true, dir: DIR.realPath };
+  } catch (e){
+    DIR.serverOk = false;
+    return { ok: false, code: 'offline', error: '配置服务未启动：' + e.message };
+  }
+}
+
+/** 打开弹窗指定真实路径。
+ *  @param {{pickName?:string}} opt pickName = 刚在浏览器里选中的文件夹名，
+ *         用于给出「你应该找哪个文件夹」的提示，并尝试自动定位。 */
+async function openPathDlg(opt = {}){
+  const dlg = $('#pathDlg');
+  dlg.classList.add('show');
+  $('#pdErr').textContent = '';
+  $('#pdPath').value = DIR.realPath || '';
+  $('#pdList').innerHTML = '';
+  $('#pdNav').style.display = 'none';
+  updateDirUI();
+  $('#pdClear').style.display = DIR.realPath ? '' : 'none';
+
+  // 提示语跟着场景走
+  const hint = $('.pd-hint');
+  if (hint){
+    hint.innerHTML = opt.pickName
+      ? `已选好文件夹「<b>${opt.pickName}</b>」，但浏览器出于安全考虑<b>不告诉网页它的磁盘位置</b>。`
+        + `请点下面的盘符找到同一个文件夹（名字应为 <b>${opt.pickName}</b>），选中后确定。`
+        + `也可以直接粘贴路径。指定一次即会记住。`
+      : `浏览器的「选择文件夹」出于安全考虑<b>不提供真实路径</b>，所以「打开文件夹」需要在这里指定一次。`
+        + `可以点下面的盘符一层层进，也可以直接粘贴路径。指定后会自动记住。`;
+  }
+
+  // 从「盘符」开始浏览
+  await browseDrives();
+
+  // 尽力帮用户定位：在常见位置里找同名文件夹，找到就直接跳过去
+  if (opt.pickName) autoLocate(opt.pickName);
+  else if (DIR.realPath) browseTo(DIR.realPath);
+  else setTimeout(() => $('#pdPath').focus(), 30);
+}
+
+/** 在若干常见位置里找同名文件夹，找到就跳过去（找不到就静默留在盘符列表）。 */
+async function autoLocate(name){
+  if (!name) return;
+  const guesses = [];
+  try {
+    const j = await (await fetch(CFG_URL + '/drives')).json();
+    for (const d of (j.drives || [])) {
+      guesses.push(d + 'Pictures', d + 'Downloads', d + 'Desktop', d + 'Documents');
+      guesses.push(d.replace(/\\$/, ''));
+    }
+  } catch { return; }
+  for (const g of guesses) {
+    try {
+      const r = await fetch(CFG_URL + '/list-dir?dir=' + encodeURIComponent(g));
+      const j = await r.json();
+      if (j.ok && (j.dirs || []).some(x => x === name)){
+        const sep = g.endsWith('\\') ? '' : '\\';
+        browseTo(g + sep + name);
+        return;
+      }
+    } catch { /* 继续试下一个 */ }
+  }
+  // 没找到：把名字放进输入框末尾当提示，让用户自己补全
+  const el = $('#pdPath');
+  if (!el.value.trim()){ el.focus(); }
+}
+
+/** 列出所有盘符作为浏览起点 */
+async function browseDrives(){
+  const list = $('#pdList');
+  list.innerHTML = '';
+  $('#pdNav').style.display = 'none';
+  try {
+    const r = await fetch(CFG_URL + '/drives');
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    DIR.serverOk = true;
+    (j.drives || []).forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'it';
+      el.innerHTML = '<span>💽</span>';
+      el.appendChild(document.createTextNode(d));
+      el.onclick = () => browseTo(d);
+      list.appendChild(el);
+    });
+    if (!(j.drives || []).length) {
+      const em = document.createElement('div');
+      em.className = 'it';
+      em.style.color = 'var(--fg3)';
+      em.style.cursor = 'default';
+      em.textContent = '（没有检测到盘符）';
+      list.appendChild(em);
+    }
+  } catch (e){
+    DIR.serverOk = false;
+    $('#pdErr').textContent =
+      '配置服务没在运行，无法浏览目录。可直接手填路径（serve.ps1 会自动启动这个服务）。';
+    $('#pdList').innerHTML = '';
+  }
+}
+
+function closePathDlg(){ $('#pathDlg').classList.remove('show'); }
+/** 列出某目录下的子文件夹（走服务端） */
+async function browseTo(dir){
+  const list = $('#pdList');
+  list.innerHTML = '';
+  if (!dir){ return browseDrives(); }
+  try {
+    const r = await fetch(CFG_URL + '/list-dir?dir=' + encodeURIComponent(dir));
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok){
+      $('#pdErr').textContent = j.error || `无法列出目录（HTTP ${r.status}）`;
+      return;
+    }
+    DIR.serverOk = true;
+    $('#pdErr').textContent = '';
+    $('#pdNav').style.display = 'flex';
+    const cur = j.dir;
+    $('#pdCur').textContent = cur;
+    $('#pdPath').value = cur;          // 点进哪层就填哪层，所见即所得
+    (j.dirs || []).forEach(name => {
+      const el = document.createElement('div');
+      el.className = 'it';
+      el.innerHTML = '<span>📁</span>';
+      el.appendChild(document.createTextNode(name));
+      el.onclick = () => {
+        const sep = cur.endsWith('\\') || cur.endsWith('/') ? '' : '\\';
+        browseTo(cur + sep + name);
+      };
+      list.appendChild(el);
+    });
+    if (!(j.dirs || []).length){
+      const em = document.createElement('div');
+      em.className = 'it';
+      em.style.color = 'var(--fg3)';
+      em.style.cursor = 'default';
+      em.textContent = '（没有子文件夹，可直接确定选这个目录）';
+      list.appendChild(em);
+    }
+    $('#pdUp').onclick = () => {
+      const par = j.parent;
+      // 到了盘符根（如 D:\）再上一级就是「我的电脑」
+      if (!par || par === cur || /^[A-Za-z]:\\?$/.test(cur)) browseDrives();
+      else browseTo(par);
+    };
+  } catch (e){
+    DIR.serverOk = false;
+    $('#pdErr').textContent = '配置服务连不上：' + e.message;
+  }
+}
+
+/** 确认弹窗里的路径 */
+async function confirmPathDlg(){
+  const p = $('#pdPath').value.trim();
+  if (!p){ $('#pdErr').textContent = '请填写一个路径（或点上面列出的目录）。'; return; }
+
+  // ★ 之前这里确认后会「顺手打开一次」，但打开的是服务端记的路径，
+  //   可能和用户刚填的不是同一个 —— 于是弹出「已在资源管理器打开：<别的目录>」，
+  //   答非所问。现在只负责登记，打开与否交给用户明确点击。
+  const r = await reportRealPath(p);
+  if (!r.ok){
+    $('#pdErr').textContent = r.error || '这个路径服务端不接受。';
+    return;
+  }
+  closePathDlg();
+  cfgSaveDebounced();
+  updateDirUI();
+  setStat(`保存目录路径已记录：${DIR.realPath} · 点「🗂️ 打开文件夹」可在资源管理器查看`, 'on');
+}
+
+/** 在资源管理器里打开保存目录。
+ *  ★ 只打开 DIR.realPath —— 绝不把 body 留空让服务端去猜它记的 lastSaveDir，
+ *    否则会打开一个用户完全没指定的目录（例如上个会话留下的旧路径）。 */
+async function openSaveDir(silent){
+  if (!DIR.realPath){
+    if (!silent){
+      setStat('还没指定保存目录的真实路径 —— 请先在弹窗里填写。', 'off');
+      openPathDlg();
+    }
+    return;
+  }
+  try {
+    const r = await fetch(CFG_URL + '/open-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir: DIR.realPath })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok){
+      DIR.serverOk = false;
+      setStat('打开失败：' + (j.error || `HTTP ${r.status}`), 'off');
+      return false;
+    }
+    setStat(`已在资源管理器打开：${j.path}`, 'on');
+    return true;
+  } catch (e){
+    DIR.serverOk = false;
+    setStat('配置服务未启动，无法打开文件夹（用 serve.ps1 启动即可）', 'off');
+    return false;
+  }
+}
+
+async function pickDir(){
+  if (!DIR.supported) return;
+  try {
+    const h = await window.showDirectoryPicker({ id: 'sdstudio', mode: 'readwrite', startIn: 'pictures' });
+    // 确认拿到了写权限
+    const perm = await h.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted'){ alert('没有拿到写入权限。'); return; }
+
+    // ★ 换了文件夹，之前记的真实路径就作废了。
+    //   浏览器只给新文件夹的名字（handle.name），给不出路径，
+    //   所以这里必须把旧路径清掉，否则「打开文件夹」会开到上一个目录去。
+    const changed = DIR.handle && DIR.handle.name !== h.name;
+    const hadPath = !!DIR.realPath;
+    DIR.handle = h;
+    DIR.auto = true;              // ★ 选了目录就默认自动存
+    if (changed || hadPath){
+      DIR.realPath = '';          // 等用户重新指定
+      reportRealPath('');         // 同步清掉服务端记的那个
+      cfgSaveDebounced();
+    }
+    await idbSet('dir', h);
+    updateDirUI();
+
+    // ★ 选完目录立刻紧接着问路径 —— 不要等用户回头再点一次「指定路径」。
+    //   浏览器拿不到路径是规范限制（实测 handle 上 0 个路径字段），
+    //   但我们可以把「选文件夹」和「填路径」串成一次连续操作，
+    //   用户感觉上就是一件事，而不是翻两遍。
+    openPathDlg({ pickName: h.name });
+    setStat(`保存目录已设为「${h.name}」· 自动保存已开启 · 请确认它的磁盘路径`, 'on');
+  } catch (e){
+    if (e.name !== 'AbortError') setStat('选择目录失败：' + e.message, 'off');
+  }
+}
+
+/* 把一批图写进目录。返回写成功的数量 */
+async function saveBatchToDir(items, meta){
+  if (!DIR.handle) return 0;
+  // 权限可能已过期（重启浏览器后），再确认一次
+  let perm = await DIR.handle.queryPermission({ mode: 'readwrite' });
+  if (perm !== 'granted'){
+    perm = await DIR.handle.requestPermission({ mode: 'readwrite' });
+    if (perm !== 'granted'){ setStat('目录权限已失效，请重新选择保存目录。', 'off'); return 0; }
+  }
+  const stamp = tsName('').replace(/\.$/, '');
+  const tag = meta.mode === 'txt2img' ? 't2i' : meta.mode === 'img2img' ? 'i2i' : 'inp';
+  // 串行模式下每张单独调用，序号必须由调用方给（meta.idx / meta.n），
+  // 否则 items.length 恒为 1，序号会永远是 01。
+  const base = Number.isFinite(meta.idx) ? meta.idx : 0;
+  const pad = String((Number.isFinite(meta.n) ? meta.n : 1) || 1).length;
+  let ok = 0;
+  for (let i = 0; i < items.length; i++){
+    const b = items[i];
+    const raw = normB64(b.b64);          // 兜底：兼容对象 / Data URI
+    if (!raw){ setStat('跳过一张：图像数据为空。', 'off'); continue; }
+    const seq = String(base + i + 1).padStart(Math.max(2, pad), '0');
+    const name = `${stamp}_${tag}_${seq}_seed${b.seed}.png`;
+    try {
+      const fh = await DIR.handle.getFileHandle(name, { create: true });
+      const w = await fh.createWritable();
+      await w.write(b64ToBlob(raw));
+      await w.close();
+      ok++;
+    } catch (e){
+      setStat('写入失败：' + e.message, 'off');
+      break;                             // 权限/磁盘类错误才中断整批
+    }
+  }
+  if (ok) setStat(`已保存 ${ok} 张到「${DIR.handle.name}」`, 'on');
+  return ok;
+}
+
+/* ══════════════ 生成 ══════════════ */
+function buildBody(){
+  savePane(S.mode);
+  const m = S.mode, s = S.m[m];
+  const prompt = (s.prompt || '').trim();
+  if (!prompt){ alert('请先填写提示词。'); return null; }
+
+  let seed = parseInt(s.seed, 10);
+  if (isNaN(seed) || seed < 0) seed = Math.floor(Math.random()*2147483647);
+
+  const body = {
+    prompt,
+    negative_prompt: (s.neg || '').trim(),
+    seed,
+    batch_count: m === 'txt2img' ? (s.batch || 1) : 1,
+    sample_params: {
+      sample_method: s.sampler || 'euler',
+      scheduler: s.scheduler || 'discrete',
+      sample_steps: s.steps,
+      guidance: { txt_cfg: +s.cfg, distilled_guidance: 3.5 }
+    }
+  };
+
+  if (m === 'txt2img'){
+    body.width = s.w; body.height = s.h;
+    if (s.w % 64 || s.h % 64){
+      if (!confirm(`${s.w}×${s.h} 不是 64 的倍数，很可能报错。继续？`)) return null;
+    }
+  } else {
+    if (!s.input){ alert('请先载入一张输入图片。'); return null; }
+    body.init_image = s.input.b64;
+    body.strength = +s.strength;
+    if (m === 'inpaint'){
+      const mask = exportMask();
+      if (!mask){ alert('请先在右边大图上涂抹要重画的区域。'); return null; }
+      body.mask_image = mask;
+      body.width = s.input.w; body.height = s.input.h;
+    } else {
+      if (s.sizeMode === 'custom'){ body.width = s.w; body.height = s.h; }
+      else { body.width = s.input.w; body.height = s.input.h; }
+    }
+  }
+  body.__seed = seed;
+  return body;
+}
+
+/* ★ 串行批量：
+   服务端 batch_count 是一次请求内部循环 N 次、跑完才一起返回，
+   中途看不到第几张、也无法取消。这里改成「一次只提交一张」，
+   逐张 await 跑完再提交下一张 —— GPU 占用与 batch_count 完全一样
+   （任何时刻都只有 1 张在算），但每张回来就立刻显示 / 存档 / 可中断。 */
+async function generate(){
+  if (S.busy) return;
+  const body = buildBody();
+  if (!body) return;
+  if (!body.width || !body.height){ alert('尺寸未确定，请重新载入输入图片。'); return; }
+
+  const dims = [body.width, body.height];
+  const N = Math.max(1, body.batch_count || 1);
+  const perExpect = estTime(body.sample_params.sample_steps, dims[0], dims[1], {
+    batch: 1,                       // 逐张估算，不含批量倍数
+    img2img: S.mode === 'img2img' || S.mode === 'inpaint',
+    strength: (S.mode === 'img2img' || S.mode === 'inpaint') ? +S.m[S.mode].strength : null
+  });
+
+  S.busy = true;
+  S.abort = false;
+  S.seq = 0;                        // 当前跑到第几张（从 1 开始）
+  S.seqN = N;
+  S.batch = [];                     // 逐张累积
+  S.expect = perExpect * N;
+
+  $('#go').disabled = true;
+  $('#go').classList.add('busy');
+  $('#go').textContent = N > 1 ? `生成中 0/${N}…` : '生成中…';
+  $('#cancel').disabled = false;
+  $('#overlay').classList.add('show');
+  $('#ovFill').style.width = '0%';
+  $('#ovTxt').textContent = N > 1 ? `准备第 1/${N} 张…` : '提交任务…';
+  $('#ovSub').textContent = `${dims[0]}×${dims[1]} · ${body.sample_params.sample_steps} 步` +
+    (N > 1 ? ` · 串行 ${N} 张，约 ${secs(perExpect * N)}` : '');
+  setStat(N > 1 ? `串行生成 0/${N}…` : '正在生成…', 'busy');
+
+  // 串行主循环
+  for (let i = 0; i < N; i++){
+    if (S.abort) break;
+    const one = Object.assign({}, body, {
+      batch_count: 1,                       // ★ 关键：永远只出 1 张
+      seed: body.__seed + i                 // 逐张递增种子，与旧行为一致
+    });
+    S.seq = i + 1;
+    S.t0 = performance.now();
+    S.iExpect = perExpect;
+    S.iTotal = 0;
+
+    const ok = await runOne(one, i, N, perExpect);
+    if (!ok) break;
+  }
+
+  const done = S.batch ? S.batch.length : 0;
+  finishGen();
+
+  if (done){
+    finishBatch(done, N, body);
+  } else if (S.abort){
+    setStat('已取消。', 'off');
+  }
+}
+
+/* 提交并等待「一张」。返回 true=拿到图，false=中止/失败 */
+async function runOne(one, idx, N, perExpect){
+  let jobId = null;
+  try {
+    const r = await fetch('/sdcpp/v1/img_gen', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(one)
+    });
+    if (!r.ok && r.status !== 202){
+      throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
+    }
+    const job = await r.json();
+    jobId = job.id;
+    S.job = jobId;
+  } catch (e){
+    setStat(`第 ${idx+1}/${N} 张提交失败：${e.message}`, 'off');
+    alert('生成失败：\n' + e.message);
+    return false;
+  }
+
+  let fails = 0;
+  for (;;){
+    await new Promise(r => setTimeout(r, 1000));
+    if (S.abort){
+      try { await fetch(`/sdcpp/v1/jobs/${jobId}/cancel`, {method:'POST'}); } catch (_){}
+      return false;
+    }
+    const el = (performance.now() - S.t0) / 1000;
+    if (el > 1800){ setStat(`第 ${idx+1}/${N} 张超时 30 分钟。`, 'off'); return false; }
+
+    let j;
+    try {
+      const r = await fetch('/sdcpp/v1/jobs/' + jobId);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      j = await r.json();
+      fails = 0;
+    } catch (e){
+      if (++fails >= 20){ setStat('与服务端失去联系。', 'off'); return false; }
+      continue;
+    }
+
+    const pct = Math.min(99, el / Math.max(perExpect, 1) * 100);
+    const head = N > 1 ? `第 ${idx+1}/${N} 张` : `生成中`;
+    $('#ovFill').style.width = pct.toFixed(1) + '%';
+    $('#ovTxt').textContent = `${head} ${secs(el)}`;
+    $('#ovSub').textContent = j.status === 'queued'
+      ? `排队中（第 ${j.queue_position} 位）`
+      : `本张预计 ${secs(perExpect)} · 已用 ${secs(el)}` +
+        (N > 1 ? ` · 整批 ${idx+1}/${N}` : '');
+    setStat(N > 1
+      ? `串行 ${idx+1}/${N} · 本张 ${secs(el)} / 预计 ${secs(perExpect)}`
+      : `生成中 ${secs(el)} / 预计 ${secs(perExpect)}`, 'busy');
+
+    if (j.status === 'queued' || j.status === 'generating') continue;
+
+    if (j.status === 'completed' && j.result?.images?.length){
+      // images[0] 是对象 { b64_json, seed, ... }，不是字符串。
+      // 有的版本/字段还会带 "data:image/png;base64," 前缀，一并剥掉。
+      const b64 = normB64(j.result.images[0]);
+      if (!b64){
+        setStat(`第 ${idx+1}/${N} 张返回数据异常，已跳过。`, 'off');
+        return false;
+      }
+      const el2 = (performance.now() - S.t0) / 1000;
+      const item = { b64, w: one.width, h: one.height, seed: one.seed, idx, secs: el2 };
+      S.batch.push(item);
+      addHist(b64, {
+        w: one.width, h: one.height, seed: one.seed,
+        steps: one.sample_params.sample_steps, mode: S.mode, total: el2
+      });
+      // ★ 每张回来立刻上屏 + 立刻存档
+      if (DIR.auto && DIR.handle){
+        saveBatchToDir([item], {mode: S.mode, w: one.width, h: one.height,
+                                steps: one.sample_params.sample_steps, idx, n: N});
+      }
+      pushStage(item, N);
+      return true;
+    }
+    const msg = j.error ? (j.error.message || JSON.stringify(j.error)) : ('状态 ' + j.status);
+    setStat(`第 ${idx+1}/${N} 张失败：${msg}`, 'off');
+    alert('生成失败：\n' + msg);
+    return false;
+  }
+}
+
+/* 每张回来立刻更新主图 + 缩略图条 */
+function pushStage(item){
+  S.cur = {b64: item.b64, w: item.w, h: item.h, seed: item.seed, mode: S.mode};
+  refreshStage();
+  renderBatchStrip();
+}
+
+function finishGen(){
+  S.busy = false;
+  S.job = null;
+  $('#go').disabled = false;
+  $('#go').classList.remove('busy');
+  $('#go').textContent = '✨ 生成';
+  $('#cancel').disabled = true;
+  $('#overlay').classList.remove('show');
+}
+
+async function cancelJob(){
+  // ★ 串行模式下取消是可用的：置位后当前张跑完就不再提交下一张
+  if (!S.busy) return;
+  S.abort = true;
+  setStat('已请求取消 —— 当前这一张跑完就停。', 'off');
+  $('#cancel').disabled = true;
+  if (S.job){
+    // 正在 generating 的会被服务端拒（409），排队的能真正取消，两者都试一下
+    try { await fetch(`/sdcpp/v1/jobs/${S.job}/cancel`, {method: 'POST'}); } catch (_){}
+  }
+}
+
+/* ══════════════ 结果 ══════════════ */
+/* 一批跑完（或中途停止）后的收尾 */
+function finishBatch(done, want, body){
+  const list = S.batch.map(b => b.b64);
+  const n = list.length;
+  const steps = body.sample_params.sample_steps;
+  const total = S.batch.reduce((a, b) => a + (b.secs || 0), 0);
+
+  setCur(S.batch[0]);
+  S.lastSeed = body.__seed;
+
+  const blob = b64ToBlob(list[0]);
+  const sps = (steps * n / Math.max(total, 0.001)).toFixed(2);
+  const per = (total / n).toFixed(1);
+
+  $('#meta').textContent =
+    `${MODE_NAME[S.mode] || S.mode} · ` +
+    `${body.width}×${body.height} · ${steps} 步 · ` +
+    (n > 1 ? `seed ${body.__seed}~${body.__seed + n - 1} · ` : `seed ${body.__seed} · `) +
+    `${secs(total)}${n > 1 ? `（${n} 张串行，均 ${per}s）` : ''} · ${bytes(blob.size)} · ${sps} 步/秒`;
+
+  $('#dl').disabled = false;
+
+  if (S.mode === 'inpaint'){
+    S.m.inpaint.previewInput = false;
+    $('[data-maskact="useResult"]').style.display = '';
+    $('[data-maskact="backToPaint"]').style.display = 'none';
+  }
+
+  refreshStage();
+  renderBatchStrip();
+
+  if (DIR.auto && DIR.handle && n){
+    setStat(`已保存 ${n} 张到「${DIR.handle.name}」· 共 ${secs(total)}`, 'on');
+  } else {
+    setStat(`完成 · ${secs(total)}（预计 ${secs(S.expect)}）${n > 1 ? ` · ${n} 张串行` : ''}` +
+            (done < want ? ` · 提前停止（${done}/${want}）` : ''), 'on');
+  }
+}
+
+
+/* 批量缩略图条 */
+function renderBatchStrip(){
+  const wrap = $('#batchWrap');
+  const strip = $('#batchStrip');
+  const n = S.batch ? S.batch.length : 0;
+  if (n <= 1){
+    wrap.classList.remove('show'); strip.innerHTML = '';
+    $('#dlAll').style.display = 'none';
+    return;
+  }
+  wrap.classList.add('show');
+  $('#batchTitle').textContent = '本批';
+  $('#batchCount').textContent = `共 ${n} 张`;
+  applyFoldUI();
+  strip.innerHTML = '';
+  S.batch.forEach((b, i) => {
+    const im = document.createElement('img');
+    im.src = 'data:image/png;base64,' + b.b64;
+    im.title = `第 ${i+1} 张 · seed ${b.seed}　（点击查看）`;
+    im.onclick = () => {
+      S.cur = {b64: b.b64, w: b.w, h: b.h, seed: b.seed, mode: S.mode};
+      S.lastSeed = b.seed;
+      $$('#batchStrip img').forEach(x => x.classList.remove('sel'));
+      im.classList.add('sel');
+
+      // ★ 与历史缩略图行为对齐：图生图/重绘模式下点缩略图 = 设为输入图，
+      //   其余模式直接刷新主图。之前这里只改了 S.cur 却不刷新，所以点了没反应。
+      if (S.mode === 'img2img' || S.mode === 'inpaint'){
+        setInput(S.mode, b.b64, `本批第 ${i+1} 张 · ${b.w}×${b.h}`);
+      } else {
+        refreshStage();
+      }
+      $('#dl').disabled = false;
+      $('#meta').textContent = `第 ${i+1}/${n} 张 · ${b.w}×${b.h} · seed ${b.seed}`;
+    };
+    bindThumbZoom(im, b);      // 双击缩略图直接放大查看
+    im.title = `第 ${i+1} 张 · ${b.w}×${b.h} · seed ${b.seed}  （双击放大）`;
+    strip.appendChild(im);
+  });
+  strip.querySelector('img')?.classList.add('sel');
+  $('#dlAll').style.display = '';
+}
+
+function setCur(item){
+  S.cur = {b64: item.b64, w: item.w, h: item.h, seed: item.seed, mode: S.mode};
+}
+
+function addHist(b64, meta){
+  S.hist.unshift({b64, meta});
+  if (S.hist.length > 50) S.hist.pop();
+  renderHist();
+}
+
+/* ★ 折叠状态：只存内存，不落盘（刷新后回到展开，符合直觉） */
+const FOLD = { batch: false, hist: false };
+
+function applyFoldUI(){
+  $('#batchWrap').classList.toggle('folded', FOLD.batch);
+  $('#histWrap').classList.toggle('folded', FOLD.hist);
+  $('#batchFold').textContent = FOLD.batch ? '▸' : '▾';
+  $('#histFold').textContent  = FOLD.hist  ? '▸' : '▾';
+  $('#batchFold').title = (FOLD.batch ? '展开' : '折叠') + '本批缩略图';
+  $('#histFold').title  = (FOLD.hist  ? '展开' : '折叠') + '历史记录';
+}
+
+function renderHist(){
+  const box = $('#hist');
+  box.innerHTML = '';
+  $('#histWrap').classList.toggle('show', S.hist.length > 0);
+  $('#histCount').textContent = S.hist.length ? `共 ${S.hist.length} 张` : '';
+  applyFoldUI();
+
+  S.hist.forEach((h, i) => {
+    const im = document.createElement('img');
+    im.src = 'data:image/png;base64,' + h.b64;
+    im.title = `${h.meta.w}×${h.meta.h} · ${h.meta.steps} 步 · seed ${h.meta.seed} · ${secs(h.meta.total)}  （双击放大）`;
+    im.onclick = () => {
+      S.cur = {b64: h.b64, w: h.meta.w, h: h.meta.h, seed: h.meta.seed, mode: h.meta.mode};
+      S.lastSeed = h.meta.seed;
+      $$('#hist img').forEach(x => x.classList.remove('sel'));
+      im.classList.add('sel');
+
+      // 在「图生图 / 重绘」模式下，点历史 = 把它设为输入图
+      if (S.mode === 'img2img' || S.mode === 'inpaint'){
+        setInput(S.mode, h.b64, `历史图 ${h.meta.w}×${h.meta.h}`);
+      } else {
+        refreshStage();
+      }
+      $('#dl').disabled = false;
+      $('#meta').textContent = `${h.meta.w}×${h.meta.h} · ${h.meta.steps} 步 · seed ${h.meta.seed} · ${secs(h.meta.total)}`;
+    };
+    bindThumbZoom(im, {b64: h.b64, w: h.meta.w, h: h.meta.h, seed: h.meta.seed});
+    box.appendChild(im);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   批量生图模块
+   ──────────────────────────────────────────────────────────────
+   设计要点（均已确认）：
+   · 每张独立随机取值；可选「跳过重复组合」，启用时张数 ≤ 组合数
+   · 占位符 {{名称}}，允许中文、禁止空格；同名占位符在同一张内取同值
+   · 未匹配数组 / 空数组 / 未闭合 → 实时标红 + 点生成时硬拦
+   · 生成参数继承文生图面板，启动时冻结快照
+   · 断点续跑 = 1 档：只续计划（不恢复图片），已算完的那张直接跳过
+   · 配置落磁盘：由 serve-config.mjs（127.0.0.1:1235）持久化
+   · 配置服务不可用 → 降级：不保存，但主功能不受影响
+   ══════════════════════════════════════════════════════════════ */
+
+/* ────────── 配置服务读写 ────────── */
+
+function cfgSetStatus(kind, text, path){
+  const bar = $('#cfgBar');
+  if (!bar) return;
+  bar.classList.remove('ok', 'err', 'busy');
+  if (kind) bar.classList.add(kind);
+  const t = $('#cfgTxt');
+  if (t) t.textContent = text;
+  const p = $('#cfgPath');
+  if (p && path !== undefined) p.textContent = path || '';
+}
+
+/** 拉取配置。失败 → 返回 null，并置降级状态。 */
+async function cfgLoad(){
+  try {
+    const r = await fetch(CFG_URL + '/config', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j || !j.ok || !j.config) throw new Error('返回结构异常');
+    S.b.cfgOk = true;
+    const c = j.config;
+    if (c.batch){
+      S.m.batch.template = typeof c.batch.template === 'string' ? c.batch.template : BATCH_FACTORY.template;
+      S.m.batch.slots = Array.isArray(c.batch.slots) ? c.batch.slots : cloneFactorySlots();
+      S.m.batch.count = Number.isFinite(+c.batch.count) ? +c.batch.count : BATCH_FACTORY.count;
+      S.m.batch.skipDup = c.batch.skipDup !== false;
+    }
+    S.b.plan = c.plan || null;
+    // 恢复用户模板库
+    S.b.templates = Array.isArray(c.templates) ? c.templates : [];
+    // 恢复保存目录的真实路径（有记过就不用再填）
+    DIR.realPath = typeof c.saveDir === 'string' ? c.saveDir : '';
+    if (DIR.realPath) reportRealPath(DIR.realPath);   // 静默向服务端重新登记
+    // ★ 必须立刻刷新按钮文案！
+    //   否则按钮停在 HTML 里写死的初始值「🗂️ 指定路径」，
+    //   看起来像没配过路径（但点下去 openSaveDir 读的是 DIR.realPath，
+    //   功能是通的，于是表现为「显示不对但能用」）。
+    updateDirUI();
+    // ★ 页面刚加载，没有任何循环在跑。磁盘上若残留 status='running'，
+    //   那是上次会话异常退出留下的，一律降级为「暂停」，让它可被续跑，
+    //   同时避免 UI 误判为「正在进行中」。
+    if (S.b.plan && S.b.plan.status === 'running') S.b.plan.status = 'paused';
+    S.b.planActive = false;
+    return c;
+  } catch (e){
+    S.b.cfgOk = false;
+    // 降级：只在「从未初始化过」时填出厂默认，避免把用户已编辑的内容冲掉
+    if (!S.m.batch.template){
+      S.m.batch.template = BATCH_FACTORY.template;
+      S.m.batch.slots = cloneFactorySlots();
+      S.m.batch.count = BATCH_FACTORY.count;
+      S.m.batch.skipDup = BATCH_FACTORY.skipDup;
+    }
+    // 状态条同步降级（否则界面上还显示「已连接」，会误导用户）
+    cfgSetStatus('err', '配置服务未启动 —— 批量设置不会被保存（主功能不受影响）', '');
+    // 若当前正停在批量面板，把状态同步回 DOM，避免状态与界面不一致
+    if (S.mode === 'batch' && $('#slotList')) loadBatchPane();
+    return null;
+  }
+}
+
+function cloneFactorySlots(){
+  return JSON.parse(JSON.stringify(BATCH_FACTORY.slots));
+}
+
+/** 写配置到磁盘。失败只提示，不抛。 */
+async function cfgSaveNow(){
+  if (!S.b.cfgOk) return false;
+  if (S.b.cfgBusy) return false;
+  S.b.cfgBusy = true;
+  cfgSetStatus('busy', '正在保存…');
+  try {
+    // ★ 落盘前先把 DOM 里的编辑同步回状态。
+    //   否则用户在输入框里刚敲的字还没进 S.m.batch，
+    //   存下去的就是旧内容，刷新后他看到的东西和刚才编辑的不一致。
+    saveBatchPane();
+    const payload = {
+      version: 1,
+      batch: {
+        template: S.m.batch.template,
+        slots: S.m.batch.slots,
+        skipDup: !!S.m.batch.skipDup,
+        count: +S.m.batch.count || 1
+      },
+      // ★ 保存目录的真实路径：浏览器自己拿不到，只能由用户填一次后记在这里
+      saveDir: DIR.realPath || '',
+      // ★ 用户模板库（整套可复现快照）
+      templates: S.b.templates || [],
+      plan: S.b.plan
+    };
+    const r = await fetch(CFG_URL + '/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || '未知错误');
+    S.b.cfgDirty = false;
+    cfgSetStatus('ok', '配置已保存 · 刷新不丢失', S.b.cfgPath);
+    return true;
+  } catch (e){
+    cfgSetStatus('err', '保存失败：' + e.message, S.b.cfgPath);
+    return false;
+  } finally {
+    S.b.cfgBusy = false;
+  }
+}
+
+/** 500ms 防抖保存。 */
+function cfgSaveDebounced(){
+  S.b.cfgDirty = true;
+  if (!S.b.cfgOk) return;
+  if (S.b.cfgTimer) clearTimeout(S.b.cfgTimer);
+  S.b.cfgTimer = setTimeout(() => { S.b.cfgTimer = null; cfgSaveNow(); }, 500);
+}
+
+/** 计划写入磁盘（不走防抖，立即写，避免刷新丢进度）。 */
+async function planSave(){
+  if (!S.b.cfgOk) return;
+  if (S.b.cfgTimer){ clearTimeout(S.b.cfgTimer); S.b.cfgTimer = null; }
+  await cfgSaveNow();
+}
+
+/* ────────── 模板哈希（判断模板是否被改过） ────────── */
+
+function templateHash(tpl, slots){
+  const s = tpl + '##' + (slots || []).map(x => (x.name || '') + ':' + (x.values || []).join(',')).join(';');
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(16);
+}
+
+/* ────────── 批量面板：DOM ↔ 状态 ────────── */
+
+function loadBatchPane(){
+  const b = S.m.batch;
+  const ta = fld('batch', 'template');
+  if (ta) ta.value = b.template;
+  const cn = fld('batch', 'count');
+  if (cn) cn.value = b.count;
+  const sd = fld('batch', 'skipDup');
+  if (sd) sd.checked = !!b.skipDup;
+  renderSlotEditor();
+  renderTplTags();
+  renderTplLib();
+  updateUndoBtn();
+  syncBatchLabels();
+  renderPlanCard();
+  renderFrozenInfo();
+}
+
+function saveBatchPane(){
+  const b = S.m.batch;
+  const ta = fld('batch', 'template');
+  if (ta) b.template = ta.value;
+  const cn = fld('batch', 'count');
+  if (cn) b.count = Math.max(1, Math.floor(+cn.value || 1));
+  const sd = fld('batch', 'skipDup');
+  if (sd) b.skipDup = !!sd.checked;
+  // 数组编辑器
+  $$('#slotList .slot').forEach(el => {
+    const i = +el.dataset.i;
+    if (!b.slots[i]) return;
+    const ni = el.querySelector('[data-slotname]');
+    const nv = el.querySelector('[data-slotvals]');
+    if (ni) b.slots[i].name = ni.value;
+    if (nv) b.slots[i].values = nv.value.split('\n').map(x => x.trim()).filter(x => x !== '');
+  });
+}
+
+/* ────────── 数组编辑器 ────────── */
+
+function renderSlotEditor(){
+  const box = $('#slotList');
+  if (!box) return;
+  const b = S.m.batch;
+  box.innerHTML = '';
+
+  if (!b.slots.length){
+    const d = document.createElement('div');
+    d.className = 'hint';
+    d.style.margin = '0 0 9px';
+    d.textContent = '还没有占位符。点下面的按钮新增，或在模板里写 {{名称}} 后回来添加。';
+    box.appendChild(d);
+  }
+
+  b.slots.forEach((s, i) => {
+    const el = document.createElement('div');
+    el.className = 'slot';
+    el.dataset.i = i;
+
+    const sh = document.createElement('div');
+    sh.className = 'sh';
+
+    const ni = document.createElement('input');
+    ni.type = 'text';
+    ni.setAttribute('data-slotname', '');
+    ni.value = s.name || '';
+    ni.placeholder = '占位符名称（如：服装）';
+    ni.oninput = () => { onSlotEdit(); };
+
+    const cnt = document.createElement('span');
+    cnt.className = 'cnt';
+    cnt.textContent = `${(s.values || []).length} 条`;
+
+    const del = document.createElement('button');
+    del.className = 'b sm';
+    del.textContent = '🗑';
+    del.title = '删除这个占位符';
+    del.onclick = () => {
+      if (!confirm(`删除占位符「${s.name || '(未命名)'}」及其全部取值？`)) return;
+      saveBatchPane();
+      b.slots.splice(i, 1);
+      renderSlotEditor(); renderTplTags(); syncBatchLabels(); cfgSaveDebounced();
+    };
+
+    sh.append(ni, cnt, del);
+
+    const nv = document.createElement('textarea');
+    nv.setAttribute('data-slotvals', '');
+    nv.value = (s.values || []).join('\n');
+    nv.placeholder = '每行一条取值\n黑色皮夹克内搭白T恤\n黄色针织马甲配牛仔短裙';
+    nv.oninput = () => { onSlotEdit(); };
+
+    const bad = document.createElement('div');
+    bad.className = 'bad';
+    bad.textContent = '⚠ 这个数组是空的，或名称与模板对不上';
+
+    el.append(sh, nv, bad);
+    box.appendChild(el);
+  });
+}
+
+/** 数组编辑器任何改动：写回状态 → 重渲染标记 → 校验 → 防抖保存 */
+function onSlotEdit(){
+  saveBatchPane();
+  // 更新每个槽的条数与红框状态
+  $$('#slotList .slot').forEach(el => {
+    const i = +el.dataset.i;
+    const s = S.m.batch.slots[i];
+    if (!s) return;
+    const cnt = el.querySelector('.cnt');
+    if (cnt) cnt.textContent = `${(s.values || []).length} 条`;
+    const used = slotIsUsed(s.name);
+    const ok = used && (s.values || []).length > 0;
+    el.classList.toggle('off', !ok);
+  });
+  renderTplTags();
+  syncBatchLabels();
+  cfgSaveDebounced();
+}
+
+function slotIsUsed(name){
+  const n = (name || '').trim();
+  if (!n) return false;
+  const { found } = scanSlots(S.m.batch.template || '');
+  return found.some(f => f.name.trim() === n);
+}
+
+/* ────────── 模板标记 + 校验显示 ────────── */
+
+function renderTplTags(){
+  const box = $('#tplTags');
+  if (!box) return;
+  const tpl = S.m.batch.template || '';
+  const { found } = scanSlots(tpl);
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  box.innerHTML = '';
+
+  if (!names.length) return;
+
+  names.forEach(n => {
+    const vals = slotValues(S.m.batch.slots, n);
+    const tg = document.createElement('span');
+    tg.className = 'tg' + (vals.length ? '' : ' miss');
+    tg.innerHTML = `<b>{{${n}}}</b><span class="n">${vals.length ? vals.length + ' 条' : '缺数组'}</span>`;
+    tg.title = vals.length ? `候选：${vals.slice(0, 8).join(' / ')}${vals.length > 8 ? ' …' : ''}` : '没有对应数组或数组为空';
+    tg.onclick = () => {
+      const el = $$('#slotList .slot').find(x => {
+        const s = S.m.batch.slots[+x.dataset.i];
+        return s && (s.name || '').trim() === n;
+      });
+      if (el){ el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.querySelector('[data-slotvals]')?.focus(); }
+    };
+    box.appendChild(tg);
+  });
+}
+
+/** 校验当前模板 + 数组。返回 {errors, unused}，并把结果显示到 UI。 */
+function validateBatch(){
+  const tpl = S.m.batch.template || '';
+  const r = validateTemplate(tpl, S.m.batch.slots);
+  const box = $('#tplErr');
+  const tb = $('#tplBox');
+  const errs = r.errors;
+
+  if (box && tb){
+    if (errs.length){
+      box.innerHTML = errs.slice(0, 6).map(e =>
+        `<div class="li">⚠ ${escapeHtml(e.msg)}</div>`
+      ).join('') + (errs.length > 6 ? `<div class="li pos">…还有 ${errs.length - 6} 条</div>` : '');
+      box.classList.add('show');
+      tb.classList.add('bad');
+    } else {
+      box.classList.remove('show');
+      box.innerHTML = '';
+      tb.classList.remove('bad');
+    }
+  }
+  return r;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ══════════════ 我的模板（用户模板库） ══════════════
+   一个模板 = 批量面板的完整可复现快照：
+     { id, name, at, template, slots, count, skipDup }
+
+   设计要点（已确认）：
+   · 保存整套（模板 + 数组 + 张数 + 跳过重复），使用后完全还原
+   · 列表每行三个动作：「使用」「覆盖」「改名」「删除」
+       - 使用：把模板套到当前面板（先自动备份当前内容）
+       - 覆盖：把当前面板的内容存回这个已有模板（先确认，不可撤销）
+   · 使用前自动把「当前」存进一个备份槽，可一键撤回（只留最近一次）
+   · 与「恢复默认模板」并列，不互相取代
+   · 落盘在 config.json 的 templates 字段，上限 20 个
+   ══════════════════════════════════════════════════ */
+
+const TPL_MAX = 20;
+
+/** 把当前批量面板的状态打包成一个模板对象。 */
+function snapshotBatch(name){
+  saveBatchPane();                 // 先同步 DOM → 状态，避免存到旧内容
+  const b = S.m.batch;
+  return {
+    id: 'tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7),
+    name: String(name || '').trim().slice(0, 60),
+    at: Date.now(),
+    template: b.template || '',
+    slots: JSON.parse(JSON.stringify(b.slots || [])),
+    count: Math.max(1, Math.floor(+b.count || 1)),
+    skipDup: !!b.skipDup
+  };
+}
+
+/** 把模板内容套用到面板上（含 DOM 与状态）。 */
+function applyTemplate(t, opt = {}){
+  if (!t) return false;
+  S.m.batch.template = typeof t.template === 'string' ? t.template : '';
+  S.m.batch.slots = Array.isArray(t.slots)
+    ? JSON.parse(JSON.stringify(t.slots))
+    : [];
+  S.m.batch.count = Number.isFinite(+t.count) ? Math.max(1, Math.floor(+t.count)) : 8;
+  S.m.batch.skipDup = t.skipDup !== false;
+  // 模板变了，旧的批次计划作废（它绑定的是旧模板哈希）
+  S.b.plan = null;
+  S.b.activeTplId = t.id || null;
+  loadBatchPane();
+  validateBatch();
+  if (!opt.silent){ cfgSaveDebounced(); }
+  return true;
+}
+
+/** 当前面板是否和某个模板一致（用于列表高亮） */
+function isSameAsTemplate(t){
+  if (!t) return false;
+  const b = S.m.batch;
+  if ((b.template || '') !== (t.template || '')) return false;
+  if (!!b.skipDup !== (t.skipDup !== false)) return false;
+  if (Math.max(1, Math.floor(+b.count || 1)) !== Math.max(1, Math.floor(+t.count || 1))) return false;
+  const a = b.slots || [], c = t.slots || [];
+  if (a.length !== c.length) return false;
+  for (let i = 0; i < a.length; i++){
+    if ((a[i].name || '') !== (c[i].name || '')) return false;
+    const av = a[i].values || [], cv = c[i].values || [];
+    if (av.length !== cv.length) return false;
+    for (let j = 0; j < av.length; j++) if (av[j] !== cv[j]) return false;
+  }
+  return true;
+}
+
+/** 渲染模板库列表 */
+function renderTplLib(){
+  const box = $('#tplLibList');
+  if (!box) return;
+  const list = S.b.templates || [];
+  box.innerHTML = '';
+
+  const stat = $('#tplLibStat');
+  if (stat) stat.textContent = list.length ? `${list.length}/${TPL_MAX}` : '';
+
+  if (!list.length){
+    const d = document.createElement('div');
+    d.id = 'tplLibEmpty';
+    d.textContent = '还没有保存的模板。调好模板与数组后点「💾 另存为模板」存一个。';    box.appendChild(d);
+    return;
+  }
+
+  list.forEach(t => {
+    const el = document.createElement('div');
+    el.className = 'tpl' + (isSameAsTemplate(t) ? ' cur' : '');
+    el.dataset.id = t.id;
+
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = t.name;
+    nm.title = t.name;
+
+    const mt = document.createElement('span');
+    mt.className = 'mt';
+    const n = (t.slots || []).length;
+    mt.textContent = `${n} 组 · ${t.count || 1} 张`;
+    mt.title = `保存于 ${new Date(t.at || Date.now()).toLocaleString('zh-CN')}`;
+
+    const bApply = document.createElement('span');
+    bApply.className = 'op';
+    bApply.textContent = '使用';
+    bApply.title = '套用这个模板到当前面板（会先自动备份当前内容）';
+    bApply.onclick = () => restoreTemplate(t.id);
+
+    const bOver = document.createElement('span');
+    bOver.className = 'op';
+    bOver.textContent = '覆盖';
+    bOver.title = '把当前面板的内容覆盖保存到这个模板';
+    bOver.onclick = () => overwriteTemplate(t.id);
+
+    const bRen = document.createElement('span');
+    bRen.className = 'op';
+    bRen.textContent = '改名';
+    bRen.onclick = () => renameTemplate(t.id);
+
+    const bDel = document.createElement('span');
+    bDel.className = 'op danger';
+    bDel.textContent = '删除';
+    bDel.onclick = () => deleteTemplate(t.id);
+
+    el.append(nm, mt, bApply, bOver, bRen, bDel);
+    box.appendChild(el);
+  });
+}
+
+/** 用当前面板的内容覆盖指定的已有模板（与「另存为」重名覆盖等价，但不用改名） */
+async function overwriteTemplate(id){
+  const t = (S.b.templates || []).find(x => x.id === id);
+  if (!t) return;
+
+  // 先从 DOM 同步，否则输入框里刚敲的字还没进状态
+  saveBatchPane();
+  if (!(S.m.batch.template || '').trim()){
+    setStat('模板正文是空的，不能覆盖。', 'off');
+    return;
+  }
+  if (isSameAsTemplate(t)){
+    setStat(`当前内容与模板「${t.name}」一致，无需覆盖。`, 'on');
+    return;
+  }
+
+  if (!confirm(`用当前面板的内容覆盖模板「${t.name}」？\n\n原内容会被替换，无法撤销。`)) return;
+
+  const snap = snapshotBatch(t.name);
+  t.template = snap.template;
+  t.slots = snap.slots;
+  t.count = snap.count;
+  t.skipDup = snap.skipDup;
+  t.at = Date.now();
+
+  S.b.activeTplId = t.id;
+  await tplSaveNow();
+  renderTplLib();
+  setStat(`已用当前内容覆盖模板「${t.name}」（${(t.slots || []).length} 组数组 · ${t.count} 张）。`, 'on');
+}
+
+/** 另存为（重名则询问是否覆盖） */
+async function saveAsTemplate(){
+  saveBatchPane();
+  if (!(S.m.batch.template || '').trim()){
+    setStat('模板正文是空的，先写点内容再保存。', 'off');
+    return;
+  }
+  const suggest = (S.b.templates && S.b.templates.length)
+    ? `模板 ${S.b.templates.length + 1}` : '我的模板 1';
+  const name = prompt('给这个模板起个名字：', suggest);
+  if (name === null) return;
+  const nm = String(name).trim();
+  if (!nm){ setStat('名字不能为空。', 'off'); return; }
+
+  S.b.templates = S.b.templates || [];
+  const exist = S.b.templates.find(t => t.name === nm);
+  if (exist){
+    if (!confirm(`已经有叫「${nm}」的模板了。\n\n用当前内容覆盖它吗？`)) return;
+    const snap = snapshotBatch(nm);
+    exist.template = snap.template;
+    exist.slots = snap.slots;
+    exist.count = snap.count;
+    exist.skipDup = snap.skipDup;
+    exist.at = Date.now();
+    S.b.activeTplId = exist.id;
+    await tplSaveNow();
+    renderTplLib();
+    setStat(`已覆盖模板「${nm}」。`, 'on');
+    return;
+  }
+
+  if (S.b.templates.length >= TPL_MAX){
+    setStat(`模板数量已达上限 ${TPL_MAX} 个，先删掉一些再存。`, 'off');
+    return;
+  }
+  const snap = snapshotBatch(nm);
+  S.b.templates.push(snap);
+  S.b.activeTplId = snap.id;
+  await tplSaveNow();
+  renderTplLib();
+  setStat(`模板「${nm}」已保存（${(snap.slots || []).length} 组数组 · ${snap.count} 张）。`, 'on');
+}
+
+/** 使用模板：先自动备份当前面板内容到备份槽 */
+async function restoreTemplate(id){
+  const t = (S.b.templates || []).find(x => x.id === id);
+  if (!t) return;
+
+  // ★ 使用前自动备份当前内容（只留最近一次），误点了能撤回
+  const changed = !isSameAsTemplate(t);
+  if (changed){
+    saveBatchPane();
+    S.b.tplBackup = snapshotBatch(`使用前备份 · ${new Date().toLocaleTimeString('zh-CN')}`);
+    S.b.tplBackup.name = '使用前的状态';
+  }
+
+  applyTemplate(t, { silent: true });
+  S.b.activeTplId = id;
+  await tplSaveNow();
+  renderTplLib();
+  updateUndoBtn();
+  setStat(`已使用模板「${t.name}」${changed ? ' · 点「↩ 撤回上次使用」可还原。' : ''}`, 'on');
+}
+
+/** 撤回上次使用 */
+async function undoTemplate(){
+  const b = S.b.tplBackup;
+  if (!b){ setStat('没有可撤回的备份。', 'off'); return; }
+  applyTemplate(b, { silent: true });
+  S.b.tplBackup = null;
+  S.b.activeTplId = null;
+  await tplSaveNow();
+  renderTplLib();
+  updateUndoBtn();
+  setStat('已撤回，回到使用之前的内容。', 'on');
+}
+
+function updateUndoBtn(){
+  const el = $('#tplUndo');
+  if (el) el.style.display = S.b.tplBackup ? '' : 'none';
+}
+
+/** 重命名 */
+async function renameTemplate(id){
+  const t = (S.b.templates || []).find(x => x.id === id);
+  if (!t) return;
+  const name = prompt('新的名字：', t.name);
+  if (name === null) return;
+  const nm = String(name).trim().slice(0, 60);
+  if (!nm){ setStat('名字不能为空。', 'off'); return; }
+  const dup = (S.b.templates || []).find(x => x.id !== id && x.name === nm);
+  if (dup){ setStat(`已经有叫「${nm}」的模板了，换个名字。`, 'off'); return; }
+  t.name = nm;
+  t.at = Date.now();
+  await tplSaveNow();
+  renderTplLib();
+  setStat(`已改名为「${nm}」。`, 'on');
+}
+
+/** 删除 */
+async function deleteTemplate(id){
+  const i = (S.b.templates || []).findIndex(x => x.id === id);
+  if (i < 0) return;
+  const t = S.b.templates[i];
+  if (!confirm(`删除模板「${t.name}」？\n\n删掉后无法恢复（当前面板上的内容不受影响）。`)) return;
+  S.b.templates.splice(i, 1);
+  if (S.b.activeTplId === id) S.b.activeTplId = null;
+  await tplSaveNow();
+  renderTplLib();
+  setStat(`已删除模板「${t.name}」。`, 'on');
+}
+
+/** 立即把模板库写盘（不等防抖，避免用户存完立刻刷新丢数据） */
+async function tplSaveNow(){
+  if (S.b.cfgTimer){ clearTimeout(S.b.cfgTimer); S.b.cfgTimer = null; }
+  return cfgSaveNow();
+}
+
+/* ────────── 组合数 / 预览 / 张数校验 ────────── */
+
+function syncBatchLabels(){
+  const b = S.m.batch;
+  const total = comboCount(b.slots, b.template);
+  const line = $('#comboLine');
+  const num = $('#comboNum');
+  const hint = $('#comboHint');
+  const n = Math.max(1, +b.count || 1);
+
+  if (num) num.textContent = total ? total.toLocaleString('en-US') : '—';
+
+  const over = b.skipDup && total > 0 && n > total;
+  if (line) line.classList.toggle('over', over);
+
+  if (hint){
+    if (!total) hint.textContent = '模板里还没有可用的占位符';
+    else if (over) hint.textContent = `张数超过组合数，最多 ${total} 张`;
+    else if (b.skipDup) hint.textContent = `不重复，最多可出 ${total} 张`;
+    else hint.textContent = `每张独立随机（允许重复）`;
+  }
+
+  // 张数警告
+  const warn = $('#countWarn');
+  if (warn){
+    let msg = '';
+    if (over) msg = `⚠ 已勾选「跳过重复组合」，张数不能超过组合总数 ${total}。`;
+    else if (total && n > total) msg = `注意：组合只有 ${total} 种，出 ${n} 张必然出现重复组合。`;
+    warn.textContent = msg;
+    warn.classList.toggle('show', !!msg);
+  }
+
+  // 模板统计
+  const { found, unclosed } = scanSlots(b.template || '');
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  const ts = $('#tplStat');
+  if (ts) ts.textContent = names.length ? `${names.length} 个占位符${unclosed.length ? ' · 有未闭合' : ''}` : '';
+
+  const ss = $('#slotStat');
+  if (ss) ss.textContent = `${b.slots.length} 组`;
+
+  renderComboPreview(total);
+  renderFrozenInfo();
+}
+
+/** 预览 = 本批将要生成的真实组合列表（不是装饰）。
+ *
+ *  之前这里只随机 showN 条存进 S.b.preview，而 runBatchLoop 又独立随机
+ *  抽一次 —— 两次随机互不相干，导致「预览」和实际出图完全对不上。
+ *  现在改成：这里一次性抽出【全部 n 条】存为权威列表，生成时直接用它。
+ *  显示仍然只渲染前 12 行，但被使用的一定是这一整份列表。 */
+function renderComboPreview(total){
+  const box = $('#comboPrev');
+  if (!box) return;
+  const b = S.m.batch;
+  const n = Math.max(1, +b.count || 1);
+  const showN = Math.min(n, 12);
+
+  const { found } = scanSlots(b.template || '');
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  const pools = names.map(x => slotValues(b.slots, x));
+
+  const st = $('#prevStat');
+  if (st) st.textContent = n > 12 ? `显示前 12 / 共 ${n} 张` : `共 ${n} 张`;
+
+  if (!names.length || pools.some(p => !p.length)){
+    box.innerHTML = '<div class="r" style="color:var(--fg3)">模板或数组还没配好</div>';
+    S.b.preview = [];
+    return;
+  }
+
+  // ★ 抽出全部 n 条（跳过重复时为不重复抽样），作为本批的唯一依据
+  const rows = [];
+  const used = [];
+  for (let i = 0; i < n; i++){
+    const c = pickCombo(b.slots, b.template, b.skipDup ? used : null, !!b.skipDup);
+    if (!c) break;
+    if (b.skipDup) used.push(c.key);
+    rows.push(c);
+  }
+  S.b.preview = rows;
+
+  box.innerHTML = rows.slice(0, showN).map((c, i) => {
+    const parts = names.map(nm => `<i>${escapeHtml(c.map[nm])}</i>`);
+    return `<div class="r"><u>${String(i+1).padStart(2,'0')}</u> ${parts.join(' · ')}</div>`;
+  }).join('') || '<div class="r">无法生成预览</div>';
+}
+
+/** 取本批要用的组合列表。若预览与当前设置不同步（改了模板/数组/张数），
+ *  现场重算一份，保证「所见即所得」。 */
+function ensurePreview(){
+  const b = S.m.batch;
+  const n = Math.max(1, +b.count || 1);
+  const total = comboCount(b.slots, b.template);
+  const want = b.skipDup && total ? Math.min(n, total) : n;
+  const has = S.b.preview || [];
+  // 张数对不上，或勾选跳重时出现重复 → 重算
+  const dupBad = b.skipDup && new Set(has.map(c => c.key)).size !== has.length;
+  const mismatch = has.length !== want;
+  if (mismatch || dupBad || !has.length){
+    renderComboPreview();
+  }
+  return S.b.preview || [];
+}
+
+/** 取本批第 i 张的组合（0 基）。数据来自计划里冻结的索引表，
+ *  这样续跑时用的是同一份组合，而不是重新随机。 */
+function comboAt(i){
+  const idxs = S.b.comboIdx;
+  const names = S.b.slotNames || slotNamesOf();
+  if (!Array.isArray(idxs) || !idxs[i]) return null;
+  const pools = names.map(n => slotValues(S.m.batch.slots, n));
+  if (pools.some(p => !p.length)) return null;
+  const row = idxs[i];
+  if (row.length !== names.length) return null;
+  const map = {};
+  for (let k = 0; k < names.length; k++){
+    const v = pools[k][row[k]];
+    if (v === undefined) return null;
+    map[names[k]] = v;
+  }
+  return { map, idxs: row, key: row.join('|') };
+}
+
+function slotNamesOf(){
+  const { found } = scanSlots(S.m.batch.template || '');
+  return [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+}
+
+/** 生成过程中在预览区标出「正在生成第几张」。 */
+function renderComboProgress(doneCount){
+  if (!S.b.preview || !S.b.preview.length) return;
+  const box = $('#comboPrev');
+  if (!box) return;
+  const rows = [...box.querySelectorAll('.r')];
+  rows.forEach((el, i) => {
+    el.style.opacity = i < doneCount ? '0.35' : '1';
+    el.style.color = i === doneCount - 1 ? 'var(--ok)' : '';
+  });
+  const st = $('#prevStat');
+  if (st) st.textContent = `生成中 ${doneCount}/${S.b.preview.length}`;
+}
+
+function renderFrozenInfo(){
+  const box = $('#frozenInfo');
+  if (!box) return;
+  const f = S.b.frozen;
+  if (f){
+    box.innerHTML = `本批冻结参数：<b style="color:var(--fg2)">${f.width}×${f.height} · ${f.steps} 步 · CFG ${(+f.cfg).toFixed(1)}</b>`;
+    return;
+  }
+  const t = S.m.txt2img;
+  box.innerHTML = `当前将使用：<b style="color:var(--fg2)">${t.w}×${t.h} · ${t.steps} 步 · CFG ${(+t.cfg).toFixed(1)}</b>（点生成时冻结）`;
+}
+
+/* ────────── 批次计划卡 ────────── */
+
+function renderPlanCard(){
+  const card = $('#planCard');
+  if (!card) return;
+  const p = S.b.plan;
+
+  if (!p){
+    card.classList.remove('show', 'done', 'live');
+    return;
+  }
+
+  const stale = p.templateHash !== templateHash(S.m.batch.template, S.m.batch.slots);
+  if (stale){
+    // 模板已改，旧计划作废
+    S.b.plan = null;
+    card.classList.remove('show', 'done', 'live');
+    cfgSaveDebounced();
+    return;
+  }
+
+  // ★ 本页正在跑这一批：只显示进度，不提供「继续」。
+  //   否则用户点「继续」会并发起第二个循环 —— 两个批次同时抢 GPU。
+  if (S.b.planActive || S.busy){
+    card.classList.remove('done');
+    card.classList.add('show', 'live');
+    $('#planTitle').textContent = '正在生成这一批';
+    $('#planDesc').innerHTML =
+      `进度 <b>${p.cursor}/${p.total}</b> 张。跑完前不能开始新的批次；` +
+      `如需中断请点右下角「取消」，进度会被保留。`;
+    $('#planResume').style.display = 'none';
+    $('#planAbandon').textContent = '取消这一批';
+    $('#planAbandon').disabled = false;
+    return;
+  }
+
+  const done = p.status === 'done';
+  card.classList.remove('live');
+  card.classList.toggle('done', done);
+  card.classList.add('show');
+
+  const title = $('#planTitle'), desc = $('#planDesc');
+  if (done){
+    title.textContent = '上一批已完成';
+    desc.innerHTML = `共 <b>${p.total}</b> 张已跑完。可以开始新的一批。`;
+    $('#planResume').style.display = 'none';
+    $('#planAbandon').textContent = '开始新批次';
+  } else {
+    title.textContent = '有未完成的批次';
+    desc.innerHTML = `进度 <b>${p.cursor}/${p.total}</b> 张。继续会沿用这一批已固定的组合与参数，跑完剩下的。`;
+    $('#planResume').style.display = '';
+    $('#planResume').textContent = `继续（剩 ${p.total - p.cursor} 张）`;
+    $('#planAbandon').textContent = '放弃本批次';
+  }
+  $('#planAbandon').disabled = false;
+}
+
+async function planAbandon(){
+  if (!confirm('放弃本批次？已生成的图片不受影响，但进度记录会清掉。')) return;
+  S.b.plan = null;
+  S.b.frozen = null;
+  S.b.usedCombos = [];
+  S.b.cursor = 0;
+  S.b.planActive = false;
+  S.b.comboIdx = null;
+  S.b.slotNames = null;
+  renderPlanCard();
+  renderFrozenInfo();
+  await planSave();
+  setStat('已放弃本批次。', 'on');
+}
+
+/* ────────── 生成 ────────── */
+
+/** 从冻结快照或文生图面板构造请求体（不含 prompt）。 */
+function batchParams(){
+  const f = S.b.frozen;
+  if (f){
+    return {
+      neg: f.negative || '',
+      w: f.width, h: f.height, steps: f.steps, cfg: f.cfg,
+      sampler: f.sampler, scheduler: f.scheduler, seed: f.seed
+    };
+  }
+  const t = S.m.txt2img;
+  return {
+    neg: (t.neg || '').trim(),
+    w: t.w, h: t.h, steps: t.steps, cfg: +t.cfg,
+    sampler: t.sampler || 'euler', scheduler: t.scheduler || 'discrete',
+    seed: parseInt(t.seed, 10)
+  };
+}
+
+function batchBody(prompt, seed){
+  const p = batchParams();
+  return {
+    prompt,
+    negative_prompt: p.neg,
+    seed,
+    batch_count: 1,
+    width: p.w,
+    height: p.h,
+    sample_params: {
+      sample_method: p.sampler,
+      scheduler: p.scheduler,
+      sample_steps: p.steps,
+      guidance: { txt_cfg: +p.cfg, distilled_guidance: 3.5 }
+    }
+  };
+}
+
+/** 点「生成」入口：批量模式走这里。 */
+async function generateBatch(){
+  if (S.busy) return;
+  saveBatchPane();
+
+  const v = validateBatch();
+  if (v.errors.length){
+    alert('模板有问题，无法生成：\n\n' + v.errors.slice(0, 6).map(e => '· ' + e.msg).join('\n')
+      + (v.errors.length > 6 ? `\n…还有 ${v.errors.length - 6} 条` : ''));
+    setStat('模板校验未通过，已拦下。', 'off');
+    return;
+  }
+
+  const b = S.m.batch;
+  const total = comboCount(b.slots, b.template);
+  if (!total){ alert('还没有可用的占位符组合。'); return; }
+
+  const n = Math.max(1, Math.floor(+b.count || 1));
+  if (b.skipDup && n > total){
+    alert(`已勾选「跳过重复组合」，张数不能超过组合总数 ${total}。\n请把张数改成 ${total} 或更少。`);
+    return;
+  }
+
+  // ★ 用「预览里已经展示给用户的那份组合」去生成，保证所见即所得。
+  //   若预览与当前设置不同步，ensurePreview 会先重算。
+  const combos = ensurePreview();
+  if (!combos.length){ alert('无法生成本批的组合列表，请检查模板与数组。'); return; }
+  if (combos.length < n && b.skipDup){
+    alert(`可用的不重复组合只有 ${combos.length} 种，少于设定的 ${n} 张。`);
+    return;
+  }
+  const actualN = combos.length;
+
+  // 冻结参数快照
+  const t = S.m.txt2img;
+  let seed = parseInt(t.seed, 10);
+  if (isNaN(seed) || seed < 0) seed = Math.floor(Math.random() * 2147483647);
+  S.b.frozen = {
+    width: t.w, height: t.h, steps: t.steps, cfg: +t.cfg,
+    sampler: t.sampler || 'euler', scheduler: t.scheduler || 'discrete',
+    seed, negative: (t.neg || '').trim()
+  };
+
+  // 记录组合的名称顺序与索引，让续跑能用同一份组合精确复原
+  const { found } = scanSlots(b.template || '');
+  const slotNames = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+
+  // 新建计划
+  S.b.plan = {
+    id: 'batch-' + Date.now(),
+    status: 'running',
+    total: actualN,
+    cursor: 0,
+    slotNames,
+    combos: combos.map(c => c.idxs),
+    usedCombos: [],
+    templateHash: templateHash(b.template, b.slots),
+    frozen: S.b.frozen,
+    results: []
+  };
+  S.b.comboIdx = combos.map(c => c.idxs);
+  S.b.usedCombos = [];
+  S.b.cursor = 0;
+  S.b.planTotal = actualN;
+  S.b.planActive = true;
+
+  await planSave();
+  renderPlanCard();
+  renderFrozenInfo();
+
+  await runBatchLoop(0);
+}
+
+/** 继续未完成的批次。 */
+async function resumeBatch(){
+  // ★ 守卫：正在跑的时候不允许再起一批（否则会并发两个循环）
+  if (S.busy){ setStat('当前有批次正在生成，请等它结束或先取消。', 'off'); return; }
+  const p = S.b.plan;
+  if (!p) return;
+  if (p.status === 'running') p.status = 'paused';   // 理论上不会走到，保险
+  S.b.frozen = p.frozen || null;
+  S.b.usedCombos = Array.isArray(p.usedCombos) ? p.usedCombos.slice() : [];
+  S.b.cursor = p.cursor || 0;
+  S.b.planTotal = p.total || 0;
+  S.b.slotNames = Array.isArray(p.slotNames) ? p.slotNames : null;
+  S.b.comboIdx = Array.isArray(p.combos) ? p.combos : null;
+  S.b.planActive = true;
+  p.status = 'running';
+  await planSave();
+  renderPlanCard();
+  renderFrozenInfo();
+  await runBatchLoop(S.b.cursor);
+}
+
+/** 串行主循环。startAt = 从第几张开始（0 基）。 */
+async function runBatchLoop(startAt){
+  const b = S.m.batch;
+  const N = S.b.planTotal;
+  const perExpect = estTime(S.b.frozen.steps, S.b.frozen.width, S.b.frozen.height, { batch: 1 });
+
+  S.busy = true;
+  S.abort = false;
+  S.seq = startAt;
+  S.seqN = N;
+  S.batch = [];
+  S.expect = perExpect * (N - startAt);
+
+  $('#go').disabled = true;
+  $('#go').classList.add('busy');
+  $('#go').textContent = `生成中 ${startAt}/${N}…`;
+  $('#cancel').disabled = false;
+  $('#overlay').classList.add('show');
+  $('#ovFill').style.width = '0%';
+  $('#ovTxt').textContent = `准备第 ${startAt + 1}/${N} 张…`;
+  $('#ovSub').textContent = `${S.b.frozen.width}×${S.b.frozen.height} · ${S.b.frozen.steps} 步` +
+    ` · 串行 ${N - startAt} 张，约 ${secs(perExpect * (N - startAt))}`;
+  setStat(`批量 ${startAt}/${N}…`, 'busy');
+
+  for (let i = startAt; i < N; i++){
+    if (S.abort) break;
+
+    // ★ 组合来自本批冻结的列表（就是预览里展示给用户的那一份）。
+    //   旧的写法在这里重新随机抽，导致预览与实际出图对不上。
+    const combo = comboAt(i);
+    if (!combo){
+      setStat('组合列表不完整，本批提前结束。', 'off');
+      break;
+    }
+    const prompt = renderPrompt(b.template, combo.map);
+
+    S.seq = i + 1;
+    S.t0 = performance.now();
+    S.iExpect = perExpect;
+
+    const one = batchBody(prompt, S.b.frozen.seed + i);
+    one.__combo = combo;
+
+    const ok = await runOne(one, i, N, perExpect);
+    if (!ok) break;
+
+    // 记录进度
+    S.b.usedCombos.push(combo.key);
+    S.b.cursor = i + 1;
+    if (S.b.plan){
+      S.b.plan.cursor = S.b.cursor;
+      S.b.plan.usedCombos = S.b.usedCombos.slice();
+      S.b.plan.results.push({
+        idx: i, seed: one.seed, w: one.width, h: one.height,
+        combo: combo.map
+      });
+    }
+    renderComboProgress(i + 1);
+    await planSave();          // 每张立刻落盘，刷新可续
+  }
+
+  const done = S.batch ? S.batch.length : 0;
+  finishGen();
+
+  if (S.b.plan){
+    S.b.plan.status = S.abort ? 'paused' : 'done';
+    if (!S.abort) S.b.plan.cursor = S.b.planTotal;
+    await planSave();
+  }
+  S.b.planActive = false;
+
+  if (done){
+    finishBatch(done, N, { width: S.b.frozen.width, height: S.b.frozen.height });
+  } else if (S.abort){
+    setStat('已取消，进度已保留，可稍后继续。', 'off');
+  }
+  renderPlanCard();
+  renderFrozenInfo();
+}
+
+/* ══════════════ 批量面板事件绑定 ══════════════ */
+
+(function bindBatchUI(){
+  const ta = fld('batch', 'template');
+  if (ta){
+    ta.addEventListener('input', () => {
+      S.m.batch.template = ta.value;
+      renderTplTags();
+      syncBatchLabels();
+      validateBatch();
+      cfgSaveDebounced();
+    });
+  }
+
+  const cn = fld('batch', 'count');
+  if (cn){
+    cn.addEventListener('input', () => {
+      S.m.batch.count = Math.max(1, Math.floor(+cn.value || 1));
+      syncBatchLabels();
+      cfgSaveDebounced();
+    });
+  }
+
+  const sd = fld('batch', 'skipDup');
+  if (sd){
+    sd.addEventListener('change', () => {
+      S.m.batch.skipDup = !!sd.checked;
+      syncBatchLabels();
+      cfgSaveDebounced();
+    });
+  }
+
+  const add = $('#slotAdd');
+  if (add){
+    add.onclick = () => {
+      saveBatchPane();
+      const base = '占位符';
+      let n = S.m.batch.slots.length + 1;
+      let name = base + n;
+      const used = new Set(S.m.batch.slots.map(s => (s.name || '').trim()));
+      while (used.has(name)) name = base + (++n);
+      S.m.batch.slots.push({ name, values: [] });
+      renderSlotEditor(); renderTplTags(); syncBatchLabels(); validateBatch();
+      cfgSaveDebounced();
+      const el = $$('#slotList .slot').pop();
+      el?.querySelector('[data-slotname]')?.focus();
+    };
+  }
+
+  const ins = $('#tplInsert');
+  if (ins){
+    ins.onclick = () => {
+      const t = fld('batch', 'template');
+      if (!t) return;
+      // 取第一个未被模板引用的数组名，否则用「新占位符」
+      const { found } = scanSlots(t.value);
+      const used = new Set(found.map(f => f.name.trim()));
+      const free = S.m.batch.slots.map(s => (s.name || '').trim()).find(n => n && !used.has(n));
+      const name = free || '占位符';
+      const txt = `{{${name}}}`;
+      const s0 = t.selectionStart ?? t.value.length;
+      const s1 = t.selectionEnd ?? s0;
+      t.value = t.value.slice(0, s0) + txt + t.value.slice(s1);
+      t.selectionStart = t.selectionEnd = s0 + txt.length;
+      t.focus();
+      S.m.batch.template = t.value;
+      renderTplTags(); syncBatchLabels(); validateBatch(); cfgSaveDebounced();
+    };
+  }
+
+  const rst = $('#tplReset');
+  if (rst){
+    rst.onclick = async () => {
+      if (!confirm('恢复默认？\n\n会重置模板文本和所有占位符数组（回到出厂 3 组、各 6 条）。\n你自己加的数组会全部丢失。')) return;
+      // ★ 与模板库一致：恢复前先备份当前内容，误点可撤回      saveBatchPane();
+      S.b.tplBackup = snapshotBatch('恢复前的状态');
+      S.m.batch.template = BATCH_FACTORY.template;
+      S.m.batch.slots = cloneFactorySlots();
+      S.m.batch.skipDup = BATCH_FACTORY.skipDup;
+      S.m.batch.count = BATCH_FACTORY.count;
+      // 模板变了，旧计划作废
+      S.b.plan = null;
+      S.b.activeTplId = null;
+      loadBatchPane();
+      validateBatch();
+      await planSave();
+      updateUndoBtn();
+      setStat('已恢复默认模板与数组。点「↩ 撤回上次使用」可还原。', 'on');
+    };
+  }
+
+  /* ── 我的模板 ── */
+  const bsa = $('#tplSaveAs');
+  if (bsa) bsa.onclick = saveAsTemplate;
+  const bub = $('#tplUndo');
+  if (bub) bub.onclick = undoTemplate;
+
+  const pr = $('#prevRoll');
+  if (pr){
+    pr.onclick = () => { saveBatchPane(); syncBatchLabels(); };
+  }
+
+  const rr = $('#planResume');
+  if (rr) rr.onclick = resumeBatch;
+  const ra = $('#planAbandon');
+  if (ra){
+    ra.onclick = () => {
+      // 正在跑 → 这个按钮是「取消这一批」，走正常取消流程（保留进度）
+      if (S.b.planActive || S.busy){ cancelJob(); return; }
+      if (S.b.plan && S.b.plan.status === 'done'){
+        // 已完成 → 直接清掉记录，开始新批次
+        S.b.plan = null;
+        S.b.frozen = null;
+        renderPlanCard(); renderFrozenInfo();
+        planSave();
+        setStat('可以开始新的一批了。', 'on');
+        return;
+      }
+      planAbandon();
+    };
+  }
+})();
+
+
+/* ══════════════ 按钮 ══════════════ */
+// 批量模式走独立入口，其余模式走原 generate()
+$('#go').onclick = () => { if (S.mode === 'batch') generateBatch(); else generate(); };
+$('#cancel').onclick = cancelJob;
+$('#dl').onclick = () => {
+  if (!S.cur) return;
+  if (DIR.handle){
+    saveBatchToDir([{b64: S.cur.b64, seed: S.cur.seed}], {mode: S.cur.mode || S.mode});
+    return;
+  }
+  download(b64ToBlob(S.cur.b64), tsName('png'));
+};
+$('#dlAll').onclick = () => {
+  if (!S.batch || S.batch.length < 2) return;
+  // 设了目录就直接写盘，否则退回浏览器下载
+  if (DIR.handle){
+    saveBatchToDir(S.batch, {mode: S.mode, idx: 0, n: S.batch.length});
+    return;
+  }
+  const stamp = tsName('').replace(/\.$/,'');
+  S.batch.forEach((b, i) => {
+    setTimeout(() => download(b64ToBlob(b.b64), `${stamp}_${String(i+1).padStart(2,'0')}_seed${b.seed}.png`), i * 350);
+  });
+  setStat(`正在下载 ${S.batch.length} 张…（设置保存目录可免去逐个确认）`, 'on');
+};
+
+/* ── 折叠按钮 ── */
+$('#batchFold').onclick = () => { FOLD.batch = !FOLD.batch; applyFoldUI(); };
+$('#histFold').onclick  = () => { FOLD.hist  = !FOLD.hist;  applyFoldUI(); };
+
+/* ── 打开文件夹 / 指定路径 ── */
+/* 已记路径 → 左键打开文件夹，右键（contextmenu）改路径，避免改一次要先清空 */
+$('#btnOpen').onclick = () => { if (DIR.realPath) openSaveDir(); else openPathDlg(); };
+$('#btnOpen').oncontextmenu = e => { e.preventDefault(); openPathDlg(); };
+$('#pdClose').onclick = closePathDlg;
+$('#pdCancel').onclick = closePathDlg;
+$('#pdClear').onclick = async () => {
+  await reportRealPath('');
+  cfgSaveDebounced();
+  updateDirUI();
+  $('#pdPath').value = '';
+  $('#pdClear').style.display = 'none';
+  $('#pdErr').textContent = '已清除。可以重新指定一个目录（也可以留空，不影响存图）。';
+};
+$('#pdOk').onclick = confirmPathDlg;
+$('#pdPath').addEventListener('keydown', e => {
+  if (e.key === 'Enter') confirmPathDlg();
+  else if (e.key === 'Escape') closePathDlg();
+});
+$('#pathDlg').addEventListener('click', e => { if (e.target.id === 'pathDlg') closePathDlg(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('#pathDlg').classList.contains('show')) closePathDlg();
+});
+
+/* ── 保存目录按钮 ── */
+$('#btnDir').onclick = pickDir;
+$('#btnAuto').onclick = () => {
+  if (!DIR.handle){ alert('请先点左边「保存目录」选一个文件夹。'); return; }
+  DIR.auto = !DIR.auto;
+  updateDirUI();
+  setStat(DIR.auto
+    ? `自动保存已开启 → 「${DIR.handle.name}」`
+    : '自动保存已关闭（仍可用「下载本批」手动写入）', 'on');
+};
+/* 右键目录按钮 = 清除已记住的目录 */
+$('#btnDir').oncontextmenu = async e => {
+  e.preventDefault();
+  if (!DIR.handle) return;
+  if (!confirm(`清除已记住的目录「${DIR.handle.name}」？`)) return;
+  DIR.handle = null; DIR.auto = false;
+  await idbDel('dir');
+  updateDirUI();
+  setStat('已清除保存目录。', 'on');
+};
+$('#btnDir').title = '点击选择保存目录　·　右键清除';
+$('#btnReload').onclick = boot;
+$('#histClear').onclick = () => {
+  if (!S.hist.length) return;
+  if (!confirm('清空历史记录？（已下载的图片不受影响）')) return;
+  S.hist = [];
+  renderHist();
+};
+
+/* ══════════════ 点击放大（灯箱）══════════════
+   舞台高度有限，竖图在上面永远只能看到一部分，所以提供一个全窗口查看层。
+   交互：点图打开 / 滚轮缩放（以光标为中心）/ 拖动平移 / 双击在适应与 100% 间切换
+        Esc 或点背景或点「关闭」退出。 */
+const LB = { on:false, scale:1, fit:1, x:0, y:0, drag:null, src:'' };
+
+function lbApply(){
+  const im = $('#lbImg');
+  im.style.transform = `translate(-50%,-50%) translate(${LB.x}px,${LB.y}px) scale(${LB.scale})`;
+  $('#lbInfo').textContent = Math.round(LB.scale / LB.fit * 100) + '%';
+}
+
+/** 按窗口可用区域算出「适应」缩放，并居中。 */
+function lbFit(){
+  const im = $('#lbImg');
+  const nw = im.naturalWidth || 1, nh = im.naturalHeight || 1;
+  const pad = 96;
+  const availW = Math.max(64, innerWidth - pad * 2);
+  const availH = Math.max(64, innerHeight - pad * 2);
+  LB.fit = Math.min(availW / nw, availH / nh);
+  // 小图不强行放大，避免糊
+  LB.fit = Math.min(LB.fit, 1);
+  LB.scale = LB.fit;
+  LB.x = 0; LB.y = 0;
+  lbApply();
+}
+
+function openLightbox(b64, meta){
+  if (!b64) return;
+  LB.src = b64;
+  LB.on = true;
+  const im = $('#lbImg');
+  const done = () => { lbFit(); };
+  im.onload = done;
+  im.src = 'data:image/png;base64,' + b64;
+  if (im.complete && im.naturalWidth) done();   // 缓存命中时 onload 可能不触发
+  $('#lbMeta').textContent = meta || '';
+  $('#lightbox').classList.add('show');
+}
+
+function closeLightbox(){
+  if (!LB.on) return;
+  LB.on = false;
+  LB.drag = null;
+  $('#lightbox').classList.remove('show');
+  $('#lbImg').classList.remove('drag');
+  $('#lbImg').src = '';                          // 释放大图内存
+}
+
+async function openLightboxFromCurrent(){
+  if (!S.cur || !S.cur.b64) return;
+  const s = S.m[S.mode] || {};
+  const meta = `${S.cur.w || '?'}×${S.cur.h || '?'}` +
+    (S.cur.seed != null && S.cur.seed >= 0 ? ` · seed ${S.cur.seed}` : '') +
+    (s.steps ? ` · ${s.steps} 步` : '') +
+    (S.mode ? ` · ${MODE_NAME[S.mode]}` : '');
+  openLightbox(S.cur.b64, meta);
+}
+
+/** 以 (cx,cy) 为锚点缩放，保证光标下的像素不动。 */
+function lbZoomAt(cx, cy, factor){
+  const next = Math.min(Math.max(LB.scale * factor, LB.fit * 0.2), LB.fit * 40);
+  if (next === LB.scale) return;
+  // 锚点换算：先把光标相对中心的位置按缩放比换算，再补偿缩放差
+  const r = next / LB.scale;
+  LB.x = cx - (cx - LB.x) * r;
+  LB.y = cy - (cy - LB.y) * r;
+  LB.scale = next;
+  lbApply();
+}
+
+(function initLightbox(){
+  const box = $('#lightbox'), im = $('#lbImg');
+
+  // 主图点击 → 打开
+  $('#img').addEventListener('click', () => openLightboxFromCurrent());
+
+  // 关闭：点背景 / 关闭按钮
+  box.addEventListener('mousedown', e => { if (e.target === box) closeLightbox(); });
+  $('#lbClose').onclick = closeLightbox;
+
+  // 滚轮缩放
+  box.addEventListener('wheel', e => {
+    if (!LB.on) return;
+    e.preventDefault();
+    const cx = e.clientX - innerWidth / 2;
+    const cy = e.clientY - innerHeight / 2;
+    lbZoomAt(cx, cy, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+  }, { passive: false });
+
+  // 工具条
+  $('#lbIn').onclick  = () => lbZoomAt(0, 0, 1.25);
+  $('#lbOut').onclick = () => lbZoomAt(0, 0, 1 / 1.25);
+  $('#lbFit').onclick = lbFit;
+  $('#lbFull').onclick = () => { LB.scale = 1; LB.x = 0; LB.y = 0; lbApply(); };
+
+  // 拖动平移
+  im.addEventListener('mousedown', e => {
+    e.preventDefault();
+    LB.drag = { sx: e.clientX - LB.x, sy: e.clientY - LB.y };
+    im.classList.add('drag');
+  });
+  window.addEventListener('mousemove', e => {
+    if (!LB.drag) return;
+    LB.x = e.clientX - LB.drag.sx;
+    LB.y = e.clientY - LB.drag.sy;
+    lbApply();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!LB.drag) return;
+    LB.drag = null;
+    im.classList.remove('drag');
+  });
+
+  // 双击：适应 ↔ 100%
+  im.addEventListener('dblclick', () => {
+    const atFull = Math.abs(LB.scale - 1) < 0.001;
+    if (atFull) lbFit();
+    else { LB.scale = 1; LB.x = 0; LB.y = 0; lbApply(); }
+  });
+
+  // 窗口尺寸变化时重新适应（仅在未手动缩放时）
+  window.addEventListener('resize', () => {
+    if (!LB.on) return;
+    if (Math.abs(LB.scale - LB.fit) < 0.001) lbFit();
+  });
+
+  // 窗口变化时主图会重新排版，蒙版要跟着对齐
+  window.addEventListener('resize', () => { syncMaskLayerToImage(); });
+  // 图片本身加载完成时也要对齐一次（naturalWidth 这时才有值）
+  $('#img').addEventListener('load', syncMaskLayerToImage);
+})();
+
+/* 缩略图双击放大：与主图共用同一个查看层 */
+function bindThumbZoom(el, item){
+  el.ondblclick = ev => {
+    ev.stopPropagation();
+    if (!item || !item.b64) return;
+    openLightbox(item.b64, `${item.w || '?'}×${item.h || '?'}` +
+      (item.seed != null && item.seed >= 0 ? ` · seed ${item.seed}` : ''));
+  };
+}
+
+document.addEventListener('keydown', e => {
+  // 灯箱优先：开着的时候 Esc 先关它，不要顺手把正在跑的任务也取消了
+  if (e.key === 'Escape' && LB.on){ e.preventDefault(); closeLightbox(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter'){ e.preventDefault(); generate(); }
+  if (e.key === 'Escape' && S.busy) cancelJob();
+  // 数字键切模式
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && document.activeElement.tagName !== 'TEXTAREA'
+      && document.activeElement.tagName !== 'INPUT'){
+    if (e.key === '1') switchMode('txt2img');
+    if (e.key === '2') switchMode('img2img');
+    if (e.key === '3') switchMode('inpaint');
+    if (e.key === '4') switchMode('batch');
+  }
+});
+
+/* ══════════════ 启动 ══════════════ */
+buildChips();
+loadPane('txt2img');
+syncLabels('txt2img');
+refreshStage();
+sizeMaskCanvas(512, 512);
+boot();
+
+// 恢复上次记住的保存目录
+(async () => {
+  if (!DIR.supported){ updateDirUI(); return; }
+  const h = await idbGet('dir');
+  if (h){
+    DIR.handle = h;
+    // 权限还在就直接用；掉了的话 requestPermission 在 Chrome 里
+    // 对「同一目录、同一站点」通常是静默通过的，不弹框
+    try {
+      if (await h.queryPermission({ mode: 'readwrite' }) !== 'granted'){
+        await h.requestPermission({ mode: 'readwrite' });
+      }
+    } catch (e) {}
+  }
+  updateDirUI();   // DIR.auto 默认为 true，有目录就自动存
+})();
+</script>
+</body>
+</html>

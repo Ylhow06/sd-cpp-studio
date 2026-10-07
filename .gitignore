@@ -1,0 +1,37 @@
+# 模型文件与生成产物：体积大、可重新获取，不入版本控制
+app/models/
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+
+# 上游二进制：从 stable-diffusion.cpp 官方发行版重新下载即可
+app/runtime/*.exe
+app/runtime/*.dll
+*.zip
+
+# 生成结果
+output/
+out/
+
+# 运行时配置：含个人保存路径，不共享
+app/ui/config.json
+app/ui/config.json.tmp
+
+# 临时 / 回收
+_trash/
+_*.mjs
+*.ovbak
+*.bak
+*.tmp
+
+# DSH 沙箱 ACL 诊断产物：工具生成，非项目源码
+.dsh-acl-reports/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.log
