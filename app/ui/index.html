@@ -522,8 +522,9 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <label>描述你想要的画面</label>
           <textarea data-f="prompt" placeholder="例：夕阳下的海边灯塔，岩石海岸，海浪拍岸，电影感光影，超高细节"></textarea>
           <div class="chips" data-chips="txt2img" style="margin-top:9px"></div>
-          <label>排除内容（反向提示词）</label>
-          <textarea data-f="neg" style="min-height:48px" placeholder="例：模糊，低质量，多余手指，水印，文字"></textarea>
+          <label>排除内容（反向提示词） <a href="#" data-act="resetneg" style="float:right;font-size:11px;color:var(--dim)">恢复默认</a></label>
+          <textarea data-f="neg" style="min-height:48px" placeholder="例：模糊，低质量，多余手指，水印，文字" data-default-neg></textarea>
+          <div class="chips" data-negchips="txt2img" style="margin-top:9px"></div>
         </div>
 
         <div class="sec collapsible">
@@ -628,7 +629,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <textarea data-f="prompt" placeholder="例：同一场景，改成暴雨夜晚，闪电，湿漉漉的地面反光"></textarea>
           <div class="chips" data-chips="img2img" style="margin-top:9px"></div>
           <label>排除内容</label>
-          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，低质量"></textarea>
+          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，低质量" data-default-neg></textarea>
+          <div class="chips" data-negchips="img2img" style="margin-top:9px"></div>
           <div class="hint">
             Z-Image 在 CFG 1.0 时很"护图"。想大幅改变内容，把下面的 CFG 提到 3–5。
           </div>
@@ -692,7 +694,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <textarea data-f="prompt" placeholder="例：夜晚的星空，银河，流星，深蓝色天幕，繁星点点"></textarea>
           <div class="chips" data-chips="inpaint" style="margin-top:9px"></div>
           <label>排除内容</label>
-          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，接缝，不自然"></textarea>
+          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，接缝，不自然" data-default-neg></textarea>
+          <div class="chips" data-negchips="inpaint" style="margin-top:9px"></div>
         </div>
 
         <div class="sec collapsible">
@@ -948,6 +951,12 @@ const $$ = s => [...document.querySelectorAll(s)];
 const $$m = (sel, m) => $$(`[data-pane="${m}"] ${sel}`);
 const fld = (m, f) => document.querySelector(`[data-pane="${m}"] [data-f="${f}"]`);
 
+/* ── 默认负面提示词 ──
+   质量词/发图平台的惯用禁词，绝大多数模型都按英文 CLIP 系文本编码器训练，
+   故保留英文原文；非英语模型（如中文微调底模）可自行在 UI 里改成中文。
+   注意：必须声明在 S 之前 —— S 的字面量初始化时就要读它，放后面会 TDZ 报错。 */
+const DEFAULT_NEG = 'lowres, bad anatomy, bad hands, extra limbs, missing fingers, deformed, watermark, text, ugly, disfigured, mismatched pupils, broken halo';
+
 /* ── 每个模式独立的状态（这是本次重构的核心） ── */
 const S = {
   mode: 'txt2img',
@@ -972,16 +981,16 @@ const S = {
   // 三个模式各自的参数与提示词，互不干扰
   m: {
     txt2img: {
-      prompt: '', neg: '', w: 512, h: 768, steps: 10, cfg: 1.0, seed: -1, batch: 1,
+      prompt: '', neg: DEFAULT_NEG, w: 512, h: 768, steps: 10, cfg: 1.0, seed: -1, batch: 1,
       sampler: 'euler', scheduler: 'discrete'
     },
     img2img: {
-      prompt: '', neg: '', w: 768, h: 512, steps: 10, cfg: 1.0, seed: -1,
+      prompt: '', neg: DEFAULT_NEG, w: 768, h: 512, steps: 10, cfg: 1.0, seed: -1,
       strength: 0.6, sampler: 'euler', scheduler: 'discrete',
       sizeMode: 'same', input: null, inputName: '', previewInput: false
     },
     inpaint: {
-      prompt: '', neg: '', steps: 10, cfg: 1.0, seed: -1,
+      prompt: '', neg: DEFAULT_NEG, steps: 10, cfg: 1.0, seed: -1,
       strength: 0.85, sampler: 'euler', scheduler: 'discrete',
       input: null, inputName: '', previewInput: false
     },
@@ -1454,6 +1463,13 @@ function markRatio(){
   });
 }
 
+const NEG_CHIPS = [
+  ['质量',     'lowres, blurry, jpeg artifacts, worst quality, low quality'],
+  ['人体',     'bad anatomy, bad hands, extra limbs, missing fingers, extra fingers, deformed'],
+  ['水印文字', 'watermark, text, signature, username, logo, copyright'],
+  ['脸部',     'mismatched pupils, disfigured, asymmetrical face, extra ears'],
+];
+
 /* ══════════════ 初始化 UI ══════════════ */
 function buildChips(){
   ['txt2img','img2img','inpaint'].forEach(m => {
@@ -1490,6 +1506,36 @@ function buildChips(){
       syncLabels('txt2img');
     };
     rb.appendChild(c);
+  });
+
+  buildNegChips();
+}
+
+function buildNegChips(){
+  ['txt2img','img2img','inpaint'].forEach(m => {
+    const box = $(`[data-negchips="${m}"]`);
+    if (!box) return;
+    box.innerHTML = '';
+    NEG_CHIPS.forEach(([label, frag]) => {
+      const c = document.createElement('span');
+      c.className = 'chip';
+      c.textContent = label;
+      c.title = frag;
+      c.onclick = () => {
+        const ta = fld(m, 'neg');
+        const cur = (ta.value || '').split(',').map(t => t.trim()).filter(Boolean);
+        const low = cur.map(t => t.toLowerCase());
+        frag.split(',').forEach(t => {
+          const v = t.trim();
+          if (v && !low.includes(v.toLowerCase())){ cur.push(v); low.push(v.toLowerCase()); }
+        });
+        const next = cur.join(', ');
+        ta.value = next;
+        S.m[m].neg = next;
+        c.classList.add('on');
+      };
+      box.appendChild(c);
+    });
   });
 }
 
@@ -1568,6 +1614,12 @@ document.addEventListener('click', e => {
   }
   if (act === 'clearInput'){
     setInput(m, null, '');
+  }
+  if (act === 'resetneg'){
+    e.preventDefault();
+    s.neg = DEFAULT_NEG;
+    const el = fld(m, 'neg');
+    if (el) el.value = DEFAULT_NEG;
   }
 });
 
