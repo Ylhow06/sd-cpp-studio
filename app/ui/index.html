@@ -1223,7 +1223,115 @@ function renderPrompt(tpl, combo){
   });
 }
 
-/** 随机取一组组合。skipDup 时避开 used 里出现过的组合键。 */
+/* ── 不重复抽样：惰性 Fisher–Yates（稀疏交换位）──
+ *
+ *  旧写法（已废弃）每次调用都从头枚举 total 个组合，把没用过的全塞进
+ *  free 数组，还要给每个组合 join 一个 key 字符串。而单次预览要跑 n 次
+ *  pickCombo，于是复杂度是 O(n × total)：组合总数 100 万时约 2.7 秒，
+ *  1139 万时 42 秒。这段还挂在「输入框每敲一个字符」的路径上
+ *  （onSlotEdit → syncBatchLabels → renderComboPreview），页面直接假死。
+ *
+ *  新写法把洗牌做成「用到才展开」：
+ *    · 只在 Map 里记录被交换过的位置 → 内存 O(已抽张数)
+ *    · 每张 O(1)，与 total 完全无关；100 万和 100 亿一样快
+ *    · 不物化组合空间、不 join 字符串去重
+ *  语义保持不变：同一批内绝不重复，用尽返回 null。
+ */
+const LAZY_SAMPLER = {
+  sig: '',      // 数组池指纹，变了就重开一副牌
+  total: 0,     // 组合总数
+  cursor: 0,    // 已消费的位置数；[cursor, total) 是「还没抽到的组合」
+  at: null,     // 位置 → 值（稀疏；缺省即恒等）
+  where: null   // 值 → 位置（稀疏；缺省即恒等）—— 按 used 重建时 O(1) 定位
+};
+
+/** 数组池指纹：占位符顺序 + 各池长度。变了就必须重开一副牌。 */
+function poolsSig(names, pools){
+  return names.join('\u0001') + '\u0002' + pools.map(p => p.length).join(',');
+}
+
+/** 线性索引 → 各槽下标。混合进制，槽 0 最快变化 ——
+ *  与旧实现顺序完全一致，保证磁盘上旧的 plan.combos 仍能正确复原。 */
+function decodeIdxs(k, pools){
+  const idxs = [];
+  let rem = k;
+  for (const p of pools){
+    idxs.push(rem % p.length);
+    rem = Math.floor(rem / p.length);
+  }
+  return idxs;
+}
+
+/** 组合键 "i|j|k" → 线性索引；非法键返回 -1。 */
+function keyToLinear(key, pools){
+  const parts = String(key).split('|');
+  if (parts.length !== pools.length) return -1;
+  let k = 0, stride = 1;
+  for (let i = 0; i < pools.length; i++){
+    const v = +parts[i];
+    if (!Number.isInteger(v) || v < 0 || v >= pools[i].length) return -1;
+    k += v * stride;
+    stride *= pools[i].length;
+  }
+  return k;
+}
+
+function samplerReset(sig, total){
+  const s = LAZY_SAMPLER;
+  s.sig = sig;
+  s.total = total;
+  s.cursor = 0;
+  s.at = new Map();
+  s.where = new Map();
+}
+
+/** 把某个值 v 从「未抽到」区里摘掉（用于按 used 重建进度）。
+ *  注意：不能假设「值 v 就在位置 v」—— 一旦发生过交换这条就不成立，
+ *  所以必须靠 where 反查它当前所在的位置。 */
+function samplerConsume(v){
+  const s = LAZY_SAMPLER;
+  if (!Number.isInteger(v) || v < 0 || v >= s.total || s.cursor >= s.total) return;
+  const i = s.cursor;                                  // 边界位：第一个「已死」的槽
+  const p = s.where.has(v) ? s.where.get(v) : v;       // v 当前实际所在位置
+  const vi = s.at.has(i) ? s.at.get(i) : i;            // 边界位上放着谁
+  s.at.set(i, v);
+  s.at.set(p, vi);
+  s.where.set(v, i);
+  s.where.set(vi, p);
+  s.cursor++;
+}
+
+/** 抽下一张的线性索引；用尽返回 -1。 */
+function samplerDraw(){
+  const s = LAZY_SAMPLER;
+  if (s.cursor >= s.total) return -1;
+  const i = s.cursor;
+  const j = i + Math.floor(Math.random() * (s.total - i));
+  const vi = s.at.has(i) ? s.at.get(i) : i;
+  const vj = s.at.has(j) ? s.at.get(j) : j;
+  s.at.set(i, vj);
+  s.at.set(j, vi);
+  s.where.set(vj, i);
+  s.where.set(vi, j);
+  s.cursor++;
+  return vj;
+}
+
+/** 让采样器对齐到「已抽了 used 这些」的状态。
+ *  同一批里连续调用走 O(1) 快路径；参数变了或 used 对不上才重建（O(n)）。 */
+function samplerSync(sig, total, pools, used){
+  const s = LAZY_SAMPLER;
+  const n = (used || []).length;
+  if (s.sig === sig && s.cursor === n) return;   // 快路径：接着抽
+  samplerReset(sig, total);
+  if (!n) return;
+  for (const key of used){                        // 慢路径：按 used 重建
+    const k = keyToLinear(key, pools);
+    if (k >= 0) samplerConsume(k);
+  }
+}
+
+/** 随机取一组组合。skipDup 时保证与 used 里的都不重复。 */
 function pickCombo(slots, tpl, used, skipDup){
   const { found } = scanSlots(tpl || '');
   const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
@@ -1240,22 +1348,23 @@ function pickCombo(slots, tpl, used, skipDup){
     return buildCombo(names, pools, idxs);
   }
 
-  // 跳过重复：先算出没用过的组合键，再从中随机挑
-  const usedSet = new Set(used || []);
-  const free = [];
-  for (let k = 0; k < total; k++){
-    let rem = k;
-    const idxs = [];
-    for (const p of pools){
-      idxs.push(rem % p.length);
-      rem = Math.floor(rem / p.length);
+  // 组合空间超出安全整数（2^53）时线性索引不再可靠，退回重试法。
+  // 这种量级下 n/√total 小到可忽略，实际碰撞概率为 0。
+  if (!Number.isSafeInteger(total)){
+    const usedSet = new Set(used || []);
+    for (let t = 0; t < 64; t++){
+      const idxs = pools.map(p => Math.floor(Math.random() * p.length));
+      if (!usedSet.has(idxs.join('|'))) return buildCombo(names, pools, idxs);
     }
-    const key = idxs.join('|');
-    if (!usedSet.has(key)) free.push(idxs);
+    return null;
   }
-  if (!free.length) return null;           // 组合已用尽
-  const idxs = free[Math.floor(Math.random() * free.length)];
-  return buildCombo(names, pools, idxs);
+
+  // 跳过重复：惰性洗牌，每张 O(1)，与 total 无关
+  const sig = poolsSig(names, pools);
+  samplerSync(sig, total, pools, used);
+  const k = samplerDraw();
+  if (k < 0) return null;                 // 组合已用尽
+  return buildCombo(names, pools, decodeIdxs(k, pools));
 }
 
 function buildCombo(names, pools, idxs){

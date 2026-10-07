@@ -766,6 +766,121 @@ async function main(){
     r.busy === false ? ok('busy 为 false') : bad('busy 未复位');
   }
 
+  /* ══ M2. 百万级组合空间：输入路径不卡顿 + 本批组合完整可用 ══
+     回归「跳过重复」的 O(n × total) 全量枚举：旧实现下 total=100 万时，
+     单次 syncBatchLabels（输入框每敲一个字符都会走）要 2.7 秒，
+     1139 万时 42 秒，页面直接假死。 */
+  log('\n=== M2. 百万级组合空间（性能回归）===');
+  {
+    await ev(`
+      window.confirm = () => true;
+      switchMode('batch');
+      await new Promise(r=>setTimeout(r,80));
+      // 直接铺一个百万级空间：4 个占位符 × 各 32 条 = 1048576 组合
+      S.m.batch.template = '{{p}}{{q}}{{r}}{{s}}';
+      S.m.batch.slots = [
+        { name:'p', values: Array.from({length:32},(_,i)=>'p'+i) },
+        { name:'q', values: Array.from({length:32},(_,i)=>'q'+i) },
+        { name:'r', values: Array.from({length:32},(_,i)=>'r'+i) },
+        { name:'s', values: Array.from({length:32},(_,i)=>'s'+i) }
+      ];
+      S.m.batch.skipDup = true;
+      S.m.batch.count = 40;
+      loadBatchPane();
+      await new Promise(r=>setTimeout(r,120));
+    `);
+
+    const total = await evs(`comboCount(S.m.batch.slots, S.m.batch.template)`);
+    total === 1048576 ? ok(`组合数 = 1048576（实测 ${total}）`) : bad('组合数不对', total);
+
+    // ① 输入路径耗时：模拟连打 10 个字符，每次都走 onSlotEdit → syncBatchLabels
+    const perf = await ev(`
+      const t0 = performance.now();
+      for (let i = 0; i < 10; i++){
+        S.m.batch.count = 40 + i;
+        syncBatchLabels();
+      }
+      const dt = performance.now() - t0;
+      return { dt, per: dt / 10 };`);
+    log(`  输入路径 10 次同步：${perf.dt.toFixed(1)} ms（${perf.per.toFixed(2)} ms/次）`);
+    perf.per < 50
+      ? ok(`每次输入同步 < 50ms（实测 ${perf.per.toFixed(2)}ms）`)
+      : bad('输入路径仍然卡顿', perf.per.toFixed(1) + ' ms/次');
+
+    // ② 重新预览按钮：同样必须秒回
+    const roll = await ev(`
+      const t0 = performance.now();
+      document.querySelector('#prevRoll').click();
+      const dt = performance.now() - t0;
+      return { dt, rows: document.querySelectorAll('#comboPrev .r').length };`);
+    log(`  「重新预览」耗时：${roll.dt.toFixed(1)} ms`);
+    roll.dt < 200 ? ok(`重新预览 < 200ms（实测 ${roll.dt.toFixed(1)}ms）`) : bad('预览卡顿', roll.dt.toFixed(1) + 'ms');
+
+    // ③ 百万级空间下，预览里的组合必须真的互不重复
+    const uniq = await ev(`
+      const keys = S.b.preview.map(c => c.key);
+      return { n: keys.length, uniq: new Set(keys).size };`);
+    uniq.n === 40 && uniq.uniq === 40
+      ? ok('百万级空间下预览 40 张互不重复')
+      : bad('预览有重复或数量不对', JSON.stringify(uniq));
+
+    // ④ 真的跑一批（拦住网络，只验证组合表与计划落盘的一致性）
+    const run = await ev(`
+      window.__netBlocked = true;
+      const p0 = S.b.preview.map(c => c.key);
+      S.b.plan = {
+        id:'perf-'+Date.now(), status:'running', total:0, cursor:0,
+        slotNames:null, combos:[], usedCombos:[], templateHash:'', frozen:null, results:[]
+      };
+      const combos = ensurePreview();
+      const { found } = scanSlots(S.m.batch.template);
+      const slotNames = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+      S.b.comboIdx = combos.map(c => c.idxs);
+      S.b.slotNames = slotNames;
+      S.b.planTotal = combos.length;
+      // 逐张走真实取值路径 comboAt()，检查索引表能精确复原每组
+      const bad = [];
+      for (let i = 0; i < combos.length; i++){
+        const c = comboAt(i);
+        if (!c || c.key !== p0[i]) bad.push(i);
+      }
+      return { n: combos.length, bad, sample: comboAt(0).key };`);
+    log('  ' + JSON.stringify(run));
+    run.n === 40 ? ok('本批冻结 40 组索引') : bad('冻结数量不对', run.n);
+    run.bad.length === 0
+      ? ok('comboAt(i) 逐张复原的 key 与预览完全一致（索引表无错位）')
+      : bad('索引表错位', JSON.stringify(run.bad.slice(0, 5)));
+
+    // ⑤ 极端空间：1 亿组合，仍须即时
+    const huge = await ev(`
+      S.m.batch.slots = [
+        { name:'p', values: Array.from({length:100},(_,i)=>'p'+i) },
+        { name:'q', values: Array.from({length:100},(_,i)=>'q'+i) },
+        { name:'r', values: Array.from({length:100},(_,i)=>'r'+i) },
+        { name:'s', values: Array.from({length:100},(_,i)=>'s'+i) }
+      ];
+      S.m.batch.count = 30;
+      const t0 = performance.now();
+      syncBatchLabels();
+      const dt = performance.now() - t0;
+      const keys = S.b.preview.map(c => c.key);
+      return { dt, total: comboCount(S.m.batch.slots, S.m.batch.template),
+               uniq: new Set(keys).size, n: keys.length };`);
+    log(`  1 亿组合空间：${huge.dt.toFixed(1)} ms，唯一 ${huge.uniq}/${huge.n}`);
+    huge.total === 100000000 ? ok('组合数 = 1 亿') : bad('组合数不对', huge.total);
+    huge.dt < 200 ? ok(`1 亿空间预览 < 200ms（实测 ${huge.dt.toFixed(1)}ms）`) : bad('1 亿空间卡顿', huge.dt.toFixed(1) + 'ms');
+    huge.uniq === huge.n ? ok('1 亿空间下 30 张互不重复') : bad('1 亿空间出现重复', JSON.stringify(huge));
+
+    // 收尾：清掉计划，别影响后面的段落
+    await ev(`
+      S.b.plan = null; S.b.comboIdx = null; S.b.slotNames = null;
+      S.b.planTotal = 0; S.b.planActive = false; S.b.preview = [];
+      window.__netBlocked = false;`);
+    await ev(`await cfgSaveNow();`);
+    await sleep(150);
+    await makePage();               // 重载，让后面的段落从干净状态继续
+  }
+
   log('\n=== N. 页面 JS 异常检查 ===');
   {
     const real = page.jsErrors.filter(e => !/fetch|network|ECONNREFUSED|Not implemented|indexedDB|canvas/i.test(e));

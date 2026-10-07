@@ -113,8 +113,9 @@ node tests\test-xxx.mjs
 | 文件 | 项数 | 覆盖 |
 |---|---|---|
 | `test-slot-engine.mjs` | 29 | 占位符扫描与组合数计算（纯逻辑） |
+| `test-lazy-sampler.mjs` | 21 | 惰性洗牌采样器：抽满不重不漏、卡方均匀性、续跑重建、稀疏性 |
 | `test-dom-refs.mjs` | 23 | DOM id 引用一致性、启动默认值、标签闭合 |
-| `test-e2e-jsdom.mjs` | 93 | jsdom 加载真实页面跑端到端 |
+| `test-e2e-jsdom.mjs` | 102 | jsdom 加载真实页面跑端到端（含百万级组合空间性能回归） |
 | `test-batch-strip.mjs` | 35 | 缩略图条点击与折叠 |
 | `test-open-dir-ui.mjs` | 79 | 打开目录的前端流程 |
 | `test-tpl-lib.mjs` | 84 | 模板库增删改查与覆盖 |
@@ -122,11 +123,21 @@ node tests\test-xxx.mjs
 | `test-contain-geometry.mjs` | 54 | 各种宽高比的缩放几何 |
 | `test-open-dir.mjs` | 62 | 配置服务接口与安全（**需先起服务**） |
 
-前 8 套离线即可运行。最后一需要先启动配置服务：
+前 9 套离线即可运行。最后一套需要先启动配置服务：
 
 ```bat
 node config-service\serve-config.mjs 1247
 node tests\test-open-dir.mjs 1247
+```
+
+### 离线测试需要 jsdom
+
+6 套 jsdom 测试（`test-e2e-jsdom` / `test-batch-strip` / `test-open-dir-ui` /
+`test-tpl-lib` / `test-lightbox`）从 `%TEMP%\sdjsdom\node_modules\jsdom` 加载 jsdom。
+缺失时先装一次：
+
+```bat
+npm install jsdom --prefix %TEMP%\sdjsdom
 ```
 
 ### 测试不碰你的配置
