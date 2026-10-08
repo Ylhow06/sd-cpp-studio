@@ -1,5 +1,7 @@
 # 本地生图工作台
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 基于 [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) 的本地图像生成前端：
 一个**单文件 Web UI**（无构建步骤）+ 一个负责配置持久化的 **Node 小服务**。
 
@@ -112,6 +114,8 @@ node tools\batch-run.mjs --help
 
 `app\runtime\` 里是 stable-diffusion.cpp 的预编译产物，自带 MIT 许可证
 （`ggml.txt`、`stable-diffusion.cpp.txt`）。
+
+本项目源码以 **MIT License** 开源（见 `LICENSE`）。
 
 ---
 
