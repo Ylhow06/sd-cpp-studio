@@ -160,6 +160,7 @@ node tools\batch-run.mjs --help
 .
 ├── app\                    程序本体
 │   ├── ui\index.html       单文件 UI（全部前端逻辑都在这里，无构建）
+│   │                         配合 docs\单文件UI协作指南.md 阅读
 │   ├── ui\config.json      运行时生成的配置（首次启动自动创建）
 │   ├── models\             模型文件
 │   └── runtime\            sd-server.exe 及其依赖的 dll
@@ -222,6 +223,9 @@ node tests\test-xxx.mjs
 node config-service\serve-config.mjs 1247
 node tests\test-open-dir.mjs 1247
 ```
+
+> 改动 UI 前请先读 **docs\单文件UI协作指南.md**（Agent 版，含命名/作用域/
+> 测试链路规则，针对 coding-agent 协作写）。
 
 ### 离线测试需要 jsdom
 
