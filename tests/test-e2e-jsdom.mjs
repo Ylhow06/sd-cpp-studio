@@ -562,6 +562,49 @@ async function main(){
     r.p2.w === 512 ? ok('冻结快照生效（改文生图不影响本批）') : bad('冻结失效', r.p2.w);
   }
 
+  log('\n=== L2. 估算：txt2img batch>1 不平方放大（回归）===');
+  {
+    // 走真实表现层：设 batch=4，调 syncLabels，读 [data-est] 文本。
+    // 回归目标：txt2img 开 batch 时「预计耗时」是单张×4，不是×16。
+    const r = await ev(`
+      switchMode('txt2img');
+      await new Promise(r=>setTimeout(r,60));
+      S.m.txt2img.w = 512; S.m.txt2img.h = 512; S.m.txt2img.steps = 8;
+      S.m.txt2img.batch = 4;
+      // 真实点击路径：触发 syncLabels（含估算刷新）
+      const estEl = document.querySelector('[data-pane="txt2img"] [data-est]');
+      syncLabels('txt2img');
+      const text = estEl ? estEl.textContent : '';
+      // 解析「预计耗时：约 X」里的 X
+      const m = text.match(/预计耗时：约 (.+?)（/);
+      const label = m ? m[1] : '';
+      // 单张的估算文本
+      S.m.txt2img.batch = 1;
+      syncLabels('txt2img');
+      const text1 = estEl ? estEl.textContent : '';
+      const m1 = text1.match(/预计耗时：约 (.+?)（/);
+      const label1 = m1 ? m1[1] : '';
+      // 还原
+      S.m.txt2img.batch = 4;
+      return { text, label, label1, batchTextShown: /串行 4 张/.test(text) };
+    `);
+    log('  batch4=' + JSON.stringify(r.label) + '  batch1=' + JSON.stringify(r.label1));
+    r.batchTextShown ? ok('batch=4 时文案显示「串行 4 张」') : bad('未显示串行张数', r.label);
+    r.label !== r.label1 ? ok('batch=4 与 batch=1 的估算文本不同（确实按批量缩放）') : bad('两档估算相同', r.label);
+    // 解析时长是否成倍：4 张 < 单张×5（允许固定开销反摊薄，但绝不接近 ×16）
+    function parseSec(obj){
+      const lbl = obj.label; if (!lbl) return null;
+      const mm = lbl.match(/(\d+) 分 (\d+) 秒|(\d+) 秒|(\d+) 分/);
+      if (!mm) return null;
+      return mm[1] ? (+mm[1]*60 + (+mm[2]||0)) : (mm[3] ? +mm[3] : (+mm[1]*60||0));
+    }
+    const s = parseSec(r), s1 = parseSec({label:r.label1});
+    log(`  换算秒：batch4=${s} batch1=${s1} 比值=${s1 ? (s/s1).toFixed(2) : 'n/a'}`);
+    (s && s1 && s < s1 * 5.5)
+      ? ok(`batch=4 估算 ≈ 单张×~4（实测比值 ${(s/s1).toFixed(2)}，未平方）`)
+      : bad('估算疑似平方放大', `batch4=${s} batch1=${s1}`);
+  }
+
   log('\n=== M. 模式切换不串状态 ===');
   {
     const r = await ev(`

@@ -1538,7 +1538,9 @@ function syncLabels(m){
   const est = $$m('[data-est]', m)[0];
   if (est){
     const o = estOpts(m);
-    const t = estTime(s.steps, o.w, o.h, o);
+    // estTime 只估单张（batch:1），批量倍数由下面 n 统一乘，
+    // 否则 estTime 内部 *n 又在外层 *n，batch>1 时会被平方放大。
+    const t = estTime(s.steps, o.w, o.h, Object.assign({}, o, { batch: 1 }));
     const n = Math.max(1, o.batch || 1);
     const bits = [`${s.steps} 步`, `${o.w}×${o.h}`];
     if (o.strength != null && o.strength < 1) bits.push(`强度 ${(+o.strength).toFixed(2)}`);
