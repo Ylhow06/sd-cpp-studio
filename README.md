@@ -108,7 +108,7 @@ node tools\batch-run.mjs --help
 - **Windows x64**（脚本是 `.cmd` / `.ps1`）
 - 支持 Vulkan 的显卡（AMD 核显 / NVIDIA / Intel 均可）
 - **Node.js**（只用于配置服务和测试，不参与生图）
-- 模型文件放入 `app\models\`（首次从 stable-diffusion.cpp 官方发行版 / HF 获取）
+- 模型文件：[模型安装](docs/模型安装.md)（Z-Image Turbo 三件套 或 SD 1.5）
 
 `app\runtime\` 里是 stable-diffusion.cpp 的预编译产物，自带 MIT 许可证
 （`ggml.txt`、`stable-diffusion.cpp.txt`）。
@@ -120,6 +120,7 @@ node tools\batch-run.mjs --help
 | 文档 | 内容 |
 |---|---|
 | [技术说明](docs/技术说明.md) | 技术选型与权衡、为什么用 sd-server、为什么 UI 是单文件、如何加接口 / 加测试 |
+| [模型安装](docs/模型安装.md) | 装哪些模型、放哪、从哪下载、文件名硬要求 |
 | [目录结构说明](docs/目录结构说明.md) | 目录组织、运行架构、配置服务接口、终端批量实现细节 |
 | [批量生图模块-设计规格](docs/批量生图模块-设计规格.md) | 批量生图模块的完整设计规格 |
 | [单文件 UI 协作指南](docs/单文件UI协作指南.md) | **Agent 版**：怎么安全改单文件 UI、命名 / 作用域 / 测试链路规则 |
