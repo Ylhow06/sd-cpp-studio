@@ -180,6 +180,70 @@ function originAllowed(req) {
   }
 }
 
+/* ────────────────────────── 终端运行（/run-cli） ──────────────────────────
+ *
+ *  为什么需要它：
+ *    「关掉浏览器也能跑」要求把批量任务交给终端。但 config.json 只存
+ *    模板/数组/张数/保存目录 —— 尺寸、步数、CFG、采样器、反向提示词
+ *    只在浏览器的内存里，落不了盘。所以必须由 UI 把「当时的完整快照」
+ *    交给一个能起进程的服务，由它写成任务文件再拉起 node。
+ *
+ *  安全边界（重要）：
+ *    本接口会**启动进程**，比开目录危险得多。因此：
+ *      1) 只允许 POST，且必须过 originAllowed（跨站一律 403）
+ *      2) 不接受任意命令 —— 可执行文件写死为 process.execPath（node 自身），
+ *         脚本写死为 <root>\tools\batch-run.mjs，用户数据只作为**参数值**传入，
+ *         且经 spawn(..., {shell:false}) 传数组，不存在命令拼接
+ *      3) 路径（任务文件、保存目录）都经 path.resolve 校验
+ *      4) 任务快照先写进 <root>\output\.cli-jobs\ 再交给脚本，
+ *         避免超长命令行（中文模板很长，Windows 命令行有 32K 上限）
+ */
+
+const JOB_DIR = path.join(__dirname, '..', 'output', '.cli-jobs');
+const CLI_SCRIPT = path.join(__dirname, '..', 'tools', 'batch-run.mjs');
+
+/** 最近一次拉起的终端进程（仅内存，用于 /run-cli/status 报告）。 */
+let lastCliRun = null;
+
+/** 把 UI 传来的任务快照落成任务文件，返回文件路径。 */
+async function writeJobFile(job) {
+  await fsp.mkdir(JOB_DIR, { recursive: true });
+  const name = `job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}.json`;
+  const file = path.join(JOB_DIR, name);
+  await fsp.writeFile(file, JSON.stringify(job, null, 2), 'utf8');
+  return file;
+}
+
+/**
+ * 拉起一个可见的终端窗口跑批量脚本。
+ * ★ 用 cmd /k 保留窗口，跑完不会立刻消失，用户能看到结果。
+ */
+function spawnBatchTerminal(jobFile, extraArgs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+
+    // 参数数组直传，shell:false —— 不存在命令拼接
+    const args = [process.execPath, CLI_SCRIPT, '--job', jobFile, ...extraArgs];
+
+    let child;
+    try {
+      if (process.platform === 'win32') {
+        // 用 start 开一个新窗口，/k 让它跑完停住
+        const cmd = ['/c', 'start', '""', 'cmd', '/k', ...args];
+        child = spawn('cmd.exe', cmd, { detached: true, stdio: 'ignore', windowsHide: false });
+      } else {
+        child = spawn(args[0], args.slice(1), { detached: true, stdio: 'ignore' });
+      }
+    } catch (e) {
+      return done({ ok: false, code: 'spawn', error: '启动终端失败：' + e.message });
+    }
+    child.on('error', (e) => done({ ok: false, code: 'spawn', error: '启动终端失败：' + e.message }));
+    child.on('spawn', () => { child.unref(); done({ ok: true, pid: child.pid }); });
+    setTimeout(() => done({ ok: true, pid: child.pid || null }), 2000).unref();
+  });
+}
+
 /**
  * 校验要打开的目录。
  * 不再限制「在哪个盘」，只保证：路径合法、存在、确实是目录。
@@ -596,6 +660,121 @@ const server = http.createServer(async (req, res) => {
       const cfg = factory();
       await writeConfig(cfg);
       sendJSON(res, 200, { ok: true, config: cfg });
+      return;
+    }
+
+    /* ★ 把当前这一批交给终端跑（关掉浏览器也能继续）。
+       请求体 = UI 当时的完整快照；服务端只负责落成任务文件 + 拉起终端。 */
+    if (p === '/run-cli' && req.method === 'POST') {
+      const text = await readBody(req);
+      let job;
+      try {
+        job = JSON.parse(text);
+      } catch (e) {
+        sendJSON(res, 400, { ok: false, error: 'JSON 解析失败：' + e.message });
+        return;
+      }
+      if (!job || typeof job !== 'object') {
+        sendJSON(res, 400, { ok: false, error: '任务快照必须是 JSON 对象' });
+        return;
+      }
+      if (typeof job.template !== 'string' || !job.template.trim()) {
+        sendJSON(res, 400, { ok: false, error: '任务快照缺少 template' });
+        return;
+      }
+      if (!Array.isArray(job.slots)) {
+        sendJSON(res, 400, { ok: false, error: '任务快照缺少 slots 数组' });
+        return;
+      }
+
+      // 保存目录：有就校验并建出来，脚本写盘前不再依赖浏览器权限
+      if (typeof job.outDir === 'string' && job.outDir.trim()) {
+        const chk = checkOpenAllowed(job.outDir.trim(), { create: true });
+        if (!chk.ok) {
+          sendJSON(res, codeToStatus(chk.code), { ok: false, code: chk.code, error: '保存目录不可用：' + chk.error });
+          return;
+        }
+        job.outDir = chk.path;
+      }
+
+      if (!fs.existsSync(CLI_SCRIPT)) {
+        sendJSON(res, 500, { ok: false, error: '找不到批量脚本：' + CLI_SCRIPT });
+        return;
+      }
+
+      let jobFile;
+      try {
+        jobFile = await writeJobFile(job);
+      } catch (e) {
+        sendJSON(res, 500, { ok: false, error: '写任务文件失败：' + e.message });
+        return;
+      }
+
+      // dryRun：只落文件、打印将要执行的命令，不真的起进程（给测试用）
+      if (job.dryRun === true) {
+        const args = [process.execPath, CLI_SCRIPT, '--job', jobFile];
+        sendJSON(res, 200, { ok: true, dryRun: true, jobFile, argv: args });
+        return;
+      }
+
+      const r = await spawnBatchTerminal(jobFile, []);
+      if (!r.ok) {
+        sendJSON(res, 500, { ok: false, error: r.error });
+        return;
+      }
+      lastCliRun = { at: Date.now(), jobFile, pid: r.pid || null };
+      sendJSON(res, 200, {
+        ok: true, jobFile, pid: r.pid || null,
+        hint: '终端窗口已打开，浏览器可以关掉了。'
+      });
+      return;
+    }
+
+    /* 查最近一次终端任务（只报告服务端记得的信息，进度以保存目录里的
+       .batch-cli-state.json 为准 —— 那由脚本维护，这里不重复读）。 */
+    if (p === '/run-cli/status' && req.method === 'GET') {
+      if (!lastCliRun) {
+        sendJSON(res, 200, { ok: true, last: null });
+        return;
+      }
+      sendJSON(res, 200, {
+        ok: true,
+        last: { at: lastCliRun.at, pid: lastCliRun.pid, jobFile: lastCliRun.jobFile }
+      });
+      return;
+    }
+
+    /* 供 UI 探测保存目录里是否有「未完成批次」以及是否可续。
+       只读 .batch-cli-state.json 并将其元信息透出；不读图片、不改任何东西。
+       返回：batch=null（没批次记录）| { stamp, done, count, finished, resumable }。 */
+    if (p === '/run-cli/state' && req.method === 'GET') {
+      const dir = (url.searchParams.get('dir') || '').trim();
+      const chk = checkOpenAllowed(dir);
+      if (!chk.ok) { sendJSON(res, codeToStatus(chk.code), { ok: false, code: chk.code, error: chk.error }); return; }
+
+      const sf = path.join(chk.path, '.batch-cli-state.json');
+      if (!fs.existsSync(sf)) { sendJSON(res, 200, { ok: true, batch: null }); return; }
+
+      let s = null;
+      try { s = JSON.parse(fs.readFileSync(sf, 'utf8')); } catch {}
+      if (!s) { sendJSON(res, 200, { ok: true, batch: null }); return; }
+
+      const done = Array.isArray(s.done) ? s.done.length : 0;
+      const count = Math.max(0, Math.floor(+s.count || 0));
+      // ★ 可续 = 未完成 且 是 v2 快照（带 template/slots）。
+      //   旧版 v1 只有参数没有模板/数组，脚本无法按快照续跑，这里就不能标「可续」。
+      const hasSnapshot = typeof s.template === 'string' && Array.isArray(s.slots) && s.slots.length > 0;
+      sendJSON(res, 200, {
+        ok: true,
+        batch: {
+          stamp: typeof s.stamp === 'string' ? s.stamp : null,
+          done, count,
+          finished: count > 0 && done >= count,
+          resumable: hasSnapshot && done < count,
+          hasSnapshot,
+          templateHash: typeof s.templateHash === 'string' ? s.templateHash : null
+        }
+      });
       return;
     }
 

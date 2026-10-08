@@ -149,7 +149,7 @@ else {
   else ok('RATIOS 定义 2:3 = 512×768');
 }
 
-// 9b. JS 状态里 txt2img 默认必须是 512×768 / 10 步
+// 9b. JS 状态里 txt2img 默认必须是 512×768 / 12 步
 const t2i = js.match(/txt2img:\s*\{([\s\S]*?)\n\s{4}\}/);
 if (!t2i) bad('找不到 S.m.txt2img');
 else {
@@ -158,34 +158,34 @@ else {
   else {
     if (+wm[1] !== 512 || +hm[1] !== 768) bad('txt2img 默认尺寸不是 512×768', wm[1] + '×' + hm[1]);
     else ok('txt2img 默认尺寸 512×768（对应 2:3）');
-    if (+sm2[1] !== 10) bad('txt2img 默认步数不是 10', sm2[1]);
-    else ok('txt2img 默认步数 10');
+    if (+sm2[1] !== 12) bad('txt2img 默认步数不是 12', sm2[1]);
+    else ok('txt2img 默认步数 12');
   }
 }
 
-// 9c. 三个模式的默认步数都应是 10
+// 9c. 三个模式的默认步数都应是 12
 console.log('  ── 各模式默认步数 ──');
 for (const mode of ['txt2img','img2img','inpaint']){
   const blk = js.match(new RegExp(mode + ':\\s*\\{([\\s\\S]*?)\\n\\s{4}\\}'));
   if (!blk){ bad('找不到 S.m.' + mode); continue; }
   const sm2 = blk[1].match(/\bsteps:\s*(\d+)/);
   if (!sm2){ bad(mode + ' 没有 steps 默认值'); continue; }
-  if (+sm2[1] !== 10) bad(mode + ' 默认步数不是 10', sm2[1]);
-  else ok(mode + ' 默认步数 10');
+  if (+sm2[1] !== 12) bad(mode + ' 默认步数不是 12', sm2[1]);
+  else ok(mode + ' 默认步数 12');
 }
 
-// 9d. HTML 里三个面板的滑块与标签也必须是 10
+// 9d. HTML 里三个面板的滑块与标签也必须是 12（与 S.m 默认一致）
 const sliderVals = [...markup.matchAll(/data-f="steps"[^>]*value="(\d+)"/g)].map(m => m[1]);
 const labelVals  = [...markup.matchAll(/data-v="steps">(\d+)</g)].map(m => m[1]);
 console.log(`  HTML 滑块 value: ${sliderVals.join(', ')}`);
 console.log(`  HTML 标签文字  : ${labelVals.join(', ')}`);
 if (sliderVals.length !== 3) bad('steps 滑块数量不是 3', String(sliderVals.length));
-else if (sliderVals.some(v => v !== '10')) bad('有 steps 滑块不是 10', sliderVals.join(','));
-else ok('三个面板的 steps 滑块都是 10');
+else if (sliderVals.some(v => v !== '12')) bad('有 steps 滑块不是 12', sliderVals.join(','));
+else ok('三个面板的 steps 滑块都是 12');
 
 if (labelVals.length !== 3) bad('steps 标签数量不是 3', String(labelVals.length));
-else if (labelVals.some(v => v !== '10')) bad('有 steps 标签不是 10', labelVals.join(','));
-else ok('三个面板的 steps 标签都是 10');
+else if (labelVals.some(v => v !== '12')) bad('有 steps 标签不是 12', labelVals.join(','));
+else ok('三个面板的 steps 标签都是 12');
 
 // 9e. 没有 localStorage 之类的持久化会覆盖启动默认值
 if (/localStorage/.test(js)) bad('存在 localStorage 持久化，可能覆盖启动默认值');

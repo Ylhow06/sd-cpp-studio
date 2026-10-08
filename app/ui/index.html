@@ -540,7 +540,7 @@ button.b.sm{padding:5px 8px;font-size:12px}
             </div>
             <div class="row" style="margin-top:7px">
               <button class="b sm" data-act="swap">↔ 交换宽高</button>
-              <button class="b sm" data-act="resetwh">恢复 768×768</button>
+              <button class="b sm" data-act="resetwh">恢复 512×768</button>
             </div>
             <div class="warn" data-warn="wh"></div>
           </div>
@@ -549,8 +549,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
         <div class="sec collapsible">
           <div class="h"><span class="cv">▼</span>生成参数</div>
           <div class="bd">
-            <label>采样步数 <span class="v" data-v="steps">10</span></label>
-            <input type="range" data-f="steps" min="1" max="30" step="1" value="10">
+            <label>采样步数 <span class="v" data-v="steps">12</span></label>
+            <input type="range" data-f="steps" min="1" max="30" step="1" value="12">
             <div class="hint" data-est></div>
 
             <label>随机种子 <span class="v" data-v="seedlbl">-1</span></label>
@@ -639,8 +639,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
         <div class="sec collapsible">
           <div class="h"><span class="cv">▼</span>生成参数</div>
           <div class="bd">
-            <label>采样步数 <span class="v" data-v="steps">10</span></label>
-            <input type="range" data-f="steps" min="1" max="30" step="1" value="10">
+            <label>采样步数 <span class="v" data-v="steps">12</span></label>
+            <input type="range" data-f="steps" min="1" max="30" step="1" value="12">
             <div class="hint" data-est></div>
             <label>随机种子 <span class="v" data-v="seedlbl">-1</span></label>
             <div class="row tight">
@@ -701,8 +701,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
         <div class="sec collapsible">
           <div class="h"><span class="cv">▼</span>生成参数</div>
           <div class="bd">
-            <label>采样步数 <span class="v" data-v="steps">10</span></label>
-            <input type="range" data-f="steps" min="1" max="30" step="1" value="10">
+            <label>采样步数 <span class="v" data-v="steps">12</span></label>
+            <input type="range" data-f="steps" min="1" max="30" step="1" value="12">
             <div class="hint" data-est></div>
             <label>随机种子 <span class="v" data-v="seedlbl">-1</span></label>
             <div class="row tight">
@@ -814,6 +814,22 @@ button.b.sm{padding:5px 8px;font-size:12px}
             点生成时会把当时的参数冻结成快照，之后改文生图不会影响这一批。
           </div>
           <div id="frozenInfo" class="hint"></div>
+        </div>
+
+        <!-- ══ 终端运行 ══ -->
+        <div class="sec">
+          <div class="h">在终端运行 <span class="v" id="cliStat"></span></div>
+          <div class="hint" style="margin-top:0">
+            把这一批交给终端跑，<b style="color:var(--fg2)">浏览器可以关掉</b>，
+            生成不受影响。会带上当前的比例、步数、CFG、采样器、反向提示词和种子。
+            检测到<b style="color:var(--fg2)">未完成批次</b>时，按钮会变成
+            「继续未完成批次」，否则点下去就是<b style="color:var(--fg2)">开新批次</b>。
+          </div>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm pri" id="cliRun" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🖥 在终端运行这一批</button>
+            <button class="b sm" id="cliRunNew" style="display:none">🖥 开新批次</button>
+          </div>
+          <div id="cliOut" class="hint"></div>
         </div>
 
       </div>
@@ -981,16 +997,16 @@ const S = {
   // 三个模式各自的参数与提示词，互不干扰
   m: {
     txt2img: {
-      prompt: '', neg: DEFAULT_NEG, w: 512, h: 768, steps: 10, cfg: 1.0, seed: -1, batch: 1,
+      prompt: '', neg: DEFAULT_NEG, w: 512, h: 768, steps: 12, cfg: 1.0, seed: -1, batch: 1,
       sampler: 'euler', scheduler: 'discrete'
     },
     img2img: {
-      prompt: '', neg: DEFAULT_NEG, w: 768, h: 512, steps: 10, cfg: 1.0, seed: -1,
+      prompt: '', neg: DEFAULT_NEG, w: 768, h: 512, steps: 12, cfg: 1.0, seed: -1,
       strength: 0.6, sampler: 'euler', scheduler: 'discrete',
       sizeMode: 'same', input: null, inputName: '', previewInput: false
     },
     inpaint: {
-      prompt: '', neg: DEFAULT_NEG, steps: 10, cfg: 1.0, seed: -1,
+      prompt: '', neg: DEFAULT_NEG, steps: 12, cfg: 1.0, seed: -1,
       strength: 0.85, sampler: 'euler', scheduler: 'discrete',
       input: null, inputName: '', previewInput: false
     },
@@ -1701,8 +1717,8 @@ document.addEventListener('click', e => {
     syncLabels(m);
   }
   if (act === 'resetwh'){
-    s.w = 768; s.h = 768;
-    fld(m,'w').value = 768; fld(m,'h').value = 768;
+    s.w = 512; s.h = 768;
+    fld(m,'w').value = 512; fld(m,'h').value = 768;
     syncLabels(m);
   }
   if (act === 'dice'){
@@ -2218,6 +2234,7 @@ async function reportRealPath(p){
     }
     DIR.realPath = j.dir || p;      // 服务返回规范化后的路径
     DIR.serverOk = true;
+    cliDetect();                    // 目录变了 → 重新探测未完成批次
     return { ok: true, dir: DIR.realPath };
   } catch (e){
     DIR.serverOk = false;
@@ -3502,6 +3519,9 @@ function syncBatchLabels(){
 
   renderComboPreview(total);
   renderFrozenInfo();
+
+  // 终端运行区随批次/目录变化刷新「继续/开新」状态
+  cliDetect();
 }
 
 /** 预览 = 本批将要生成的真实组合列表（不是装饰）。
@@ -3669,6 +3689,153 @@ function renderPlanCard(){
     $('#planAbandon').textContent = '放弃本批次';
   }
   $('#planAbandon').disabled = false;
+}
+
+/* ────────── 在终端运行（关掉浏览器也能跑） ──────────
+ *
+ *  config.json 只存模板/数组/张数/保存目录 —— 尺寸、步数、CFG、采样器、
+ *  反向提示词只在内存里（S.m.txt2img），落不了盘。所以这里必须把「当时的
+ *  完整快照」交给配置服务，由它写成任务文件再拉起终端跑 tools\batch-run.mjs。
+ *  否则终端会用脚本的默认值出图，比例和反向提示词全丢。
+ */
+
+/** 组装交给终端的任务快照。与 generateBatch 的冻结逻辑保持一致。 */
+function buildCliJob(){
+  saveBatchPane();
+  savePane('txt2img');                 // 把文生图面板的编辑写回 S.m.txt2img
+
+  const v = validateBatch();
+  if (v.errors.length){
+    alert('模板有问题，无法交给终端：\n\n' + v.errors.slice(0, 6).map(e => '· ' + e.msg).join('\n'));
+    return null;
+  }
+
+  const b = S.m.batch;
+  const total = comboCount(b.slots, b.template);
+  if (!total){ alert('还没有可用的占位符组合。'); return null; }
+
+  const n = Math.max(1, Math.floor(+b.count || 1));
+  if (b.skipDup && n > total){
+    alert(`已勾选「跳过重复组合」，张数不能超过组合总数 ${total}。\n请把张数改成 ${total} 或更少。`);
+    return null;
+  }
+
+  if (!DIR.realPath){
+    alert('还没有设置保存目录。\n终端跑图需要知道把图存到哪里，请先点左侧「保存目录」选一个。');
+    return null;
+  }
+
+  // 参数：与 batchParams() 同源，保证「终端 = UI」
+  const t = S.m.txt2img;
+  let seed = parseInt(t.seed, 10);
+  if (isNaN(seed) || seed < 0) seed = Math.floor(Math.random() * 2147483647);
+
+  return {
+    version: 1,
+    from: 'ui',
+    at: Date.now(),
+    template: b.template,
+    slots: b.slots,
+    count: n,
+    skipDup: !!b.skipDup,
+    outDir: DIR.realPath,
+    params: {
+      w: t.w, h: t.h, steps: t.steps, cfg: +t.cfg,
+      sampler: t.sampler || 'euler', scheduler: t.scheduler || 'discrete',
+      neg: (t.neg || '').trim(),
+      seed
+    }
+  };
+}
+
+let cliInfo = null;   // { batch:{stamp,done,count,finished,resumable,hasSnapshot,templateHash} } 最近探测结果
+
+/** 探测保存目录里有没有未完成批次，据此决定「继续」vs「开新批」按钮。
+ *  续跑按旧快照进行，与当前模板是否一致无关（改提示词照样能续）。 */
+async function cliDetect(){
+  const stat = $('#cliStat');
+  const run = $('#cliRun'), newBtn = $('#cliRunNew');
+  cliInfo = null;
+
+  if (!run) return;
+
+  // 默认态：单主按钮 = 开新批
+  run.textContent = '🖥 在终端运行这一批';
+  run.title = '把当前这一批交给终端跑（开新批次）';
+  run.dataset.mode = 'new';
+  if (newBtn) newBtn.style.display = 'none';
+  if (stat) stat.textContent = (DIR.realPath ? '' : '未设保存目录');
+
+  if (!DIR.realPath) return;
+
+  try {
+    const r = await fetch(CFG_URL + '/run-cli/state?dir=' + encodeURIComponent(DIR.realPath), { signal: AbortSignal.timeout(4000) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok || !j.batch) return;
+
+    const { done, count, finished, resumable } = j.batch;
+    cliInfo = { batch: j.batch };
+
+    if (resumable){
+      // 有可续的未完成批次 → 主按钮「继续」，旁边再放一个「开新批次」
+      run.textContent = `🖥 继续（${done}/${count}）`;
+      run.title = `续跑上次未完成批次（${done}/${count}），按旧快照继续`;
+      run.dataset.mode = 'resume';
+      if (newBtn) newBtn.style.display = '';
+      if (stat) stat.textContent = `未完成批次（${done}/${count}）：可继续或开新批次`;
+      return;
+    }
+    if (finished){
+      if (stat) stat.textContent = `上次批次已完成（${done}/${count}）`;
+      return;
+    }
+    if (!j.batch.hasSnapshot){
+      if (stat) stat.textContent = '旧版进度无法续跑，点这里开新批次';
+      return;
+    }
+  } catch (e){
+    // 配置服务不可用：保持默认「开新批」文案
+  }
+}
+
+/** 调配置服务拉起终端。 */
+async function cliRun(mode){
+  const job = buildCliJob();
+  if (!job) return;
+
+  job.mode = (mode === 'resume') ? 'resume' : 'new';
+
+  const btn = $('#cliRun');
+  const out = $('#cliOut');
+  const stat = $('#cliStat');
+  const oldTxt = btn ? btn.textContent : '';
+  if (btn) btn.disabled = true;
+  if (stat) stat.textContent = '正在下发…';
+
+  try {
+    const r = await fetch(CFG_URL + '/run-cli', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(job)
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok){
+      throw new Error(j.error || ('HTTP ' + r.status));
+    }
+    const ago = job.mode === 'resume' ? '，续跑上次未完成批次' : '，开新批次';
+    if (stat) stat.textContent = '终端已启动';
+    out.innerHTML = `终端窗口已打开，<b style="color:var(--fg2)">现在可以关掉浏览器</b>${ago}。` +
+      `<br>任务文件：<b style="color:var(--fg2)">${j.jobFile}</b>`;
+    setStat('已交给终端运行，浏览器可以关掉了。', 'on');
+  } catch (e){
+    if (stat) stat.textContent = '下发失败';
+    out.innerHTML = `失败：${e.message}<br>` +
+      `<span style="color:var(--dim)">配置服务（serve-config.mjs）没启动时无法拉起终端。</span>`;
+    setStat('无法交给终端：' + e.message, 'off');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldTxt; }
+    cliDetect();
+  }
 }
 
 async function planAbandon(){
@@ -4003,6 +4170,11 @@ async function runBatchLoop(startAt){
 
   const rr = $('#planResume');
   if (rr) rr.onclick = resumeBatch;
+
+  const cr = $('#cliRun');
+  if (cr) cr.onclick = () => cliRun(cr.dataset.mode === 'resume' ? 'resume' : 'new');
+  const cnb = $('#cliRunNew');
+  if (cnb) cnb.onclick = () => cliRun('new');   // 「开新批次」永远是 new
   const ra = $('#planAbandon');
   if (ra){
     ra.onclick = () => {
