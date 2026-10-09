@@ -154,20 +154,23 @@ function applyJob(o){
 const SLOT_NAME_RE = /^[^\s{}]+$/;
 
 /** 扫描 {{占位符}}，返回出现位置与未闭合位置（同 index.html 的 scanSlots）。
- *  ★ 会跳过条件块标记 {{#名}} / {{/名}} —— 它们不是取值占位符。 */
+ *  ★ 会跳过条件块标记 {{#名}} / {{/名}} —— 它们不是取值占位符，
+ *    但它们的区间也要挖掉，否则会被误判成「未闭合的 {{」。 */
 function scanSlots(tpl){
   const found = [];
+  const spans = [];                    // 所有已配对 token 的区间
   const re = /\{\{([^{}]*)\}\}/g;
   let m;
   while ((m = re.exec(tpl)) !== null){
+    spans.push([m.index, m.index + m[0].length]);
     const nm = m[1].trim();
     if (nm.startsWith('#') || nm.startsWith('/')) continue;   // 块标记，不算取值
     found.push({ name: m[1], start: m.index, end: m.index + m[0].length });
   }
   let rest = tpl;
-  for (let i = found.length - 1; i >= 0; i--){
-    const f = found[i];
-    rest = rest.slice(0, f.start) + ' '.repeat(f.end - f.start) + rest.slice(f.end);
+  for (let i = spans.length - 1; i >= 0; i--){
+    const [a, b] = spans[i];
+    rest = rest.slice(0, a) + ' '.repeat(b - a) + rest.slice(b);
   }
   const unclosed = [];
   let idx;

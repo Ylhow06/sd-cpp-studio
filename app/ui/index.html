@@ -1859,6 +1859,11 @@ document.addEventListener('input', e => {
   const m = pane.dataset.pane;
   const f = el.dataset.f;
   const s = S.m[m];
+  // ★ 复选框不走这条路径：它的值语义是 checked（布尔），不是 value。
+  //   以前这里用 el.value 取值，复选框会得到字符串 "on"（恒真）——
+  //   于是「取消勾选」被当成「勾选」，并被 syncBatchLabels 写回 DOM，
+  //   表现为复选框点不动。复选框由各自的 change 处理器负责。
+  if (el.type === 'checkbox') return;
   s[f] = el.type === 'range' || el.type === 'number' ? +el.value || 0 : el.value;
   if (f === 'seed') s.seed = el.value;
   syncLabels(m);
@@ -3276,18 +3281,23 @@ function renderSlotEditor(){
     pi.type = 'number';
     pi.setAttribute('data-slotprob', '');
     pi.min = '1'; pi.max = '100'; pi.step = '1';
-    pi.value = String(Math.round(slotProb(b.slots, s.name) * 100));
+    const pct = Math.round(slotProb(b.slots, s.name) * 100);
+    pi.value = String(pct);
     pi.title = '该占位符在每张图里出现的概率。100% = 必选（默认）。';
     pi.oninput = () => { onSlotEdit(); };
     const pu = document.createElement('span');
     pu.className = 'pu';
     pu.textContent = '%';
+    // 一键切换：100% → 50%（可选）；已低于 100% → 还原成 100%（必选）
+    const isOptional = pct < 100;
     const po = document.createElement('button');
     po.className = 'b sm';
-    po.textContent = '可选';
-    po.title = '一键设为 50%（可选）';
+    po.textContent = isOptional ? '还原' : '可选';
+    po.title = isOptional
+      ? '还原成 100%（必选）'
+      : '一键设为 50%（可选）';
     po.onclick = () => {
-      pi.value = '50';
+      pi.value = isOptional ? '100' : '50';
       saveBatchPane();
       renderSlotEditor(); renderTplTags(); syncBatchLabels(); cfgSaveDebounced();
     };
@@ -3716,7 +3726,10 @@ function syncBatchLabels(){
   const sd = fld('batch', 'skipDup');
   const note = $('#skipDupNote');
   if (sd){
-    sd.checked = !!b.skipDup;
+    // ★ 不要覆盖用户正在操作的那个复选框：change 处理器先更新状态再调用本函数，
+    //   但如果本函数被别的路径（如输入框 input）提前触发，此时状态还是旧值，
+    //   写回 checked 会把用户刚点的结果抹掉。聚焦中的控件交给它自己的处理器。
+    if (document.activeElement !== sd) sd.checked = !!b.skipDup;
     sd.disabled = !dedupAllowed(b.slots, b.template);
   }
   if (note){
