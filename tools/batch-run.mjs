@@ -153,12 +153,15 @@ function applyJob(o){
 
 const SLOT_NAME_RE = /^[^\s{}]+$/;
 
-/** 扫描 {{占位符}}，返回出现位置与未闭合位置（同 index.html 的 scanSlots）。 */
+/** 扫描 {{占位符}}，返回出现位置与未闭合位置（同 index.html 的 scanSlots）。
+ *  ★ 会跳过条件块标记 {{#名}} / {{/名}} —— 它们不是取值占位符。 */
 function scanSlots(tpl){
   const found = [];
   const re = /\{\{([^{}]*)\}\}/g;
   let m;
   while ((m = re.exec(tpl)) !== null){
+    const nm = m[1].trim();
+    if (nm.startsWith('#') || nm.startsWith('/')) continue;   // 块标记，不算取值
     found.push({ name: m[1], start: m.index, end: m.index + m[0].length });
   }
   let rest = tpl;
@@ -182,16 +185,41 @@ function slotValues(slots, name){
   return (s.values || []).map(v => String(v).trim()).filter(v => v !== '');
 }
 
+/** 槽位出现概率：缺省 / 非法 → 1（必选）。只有 0<p<1 才是有意义的可选。 */
+function slotProb(slots, name){
+  const s = (slots || []).find(x => (x.name || '').trim() === name);
+  if (!s) return 1;
+  const n = Number(s.p);
+  return (Number.isFinite(n) && n > 0 && n < 1) ? n : 1;
+}
+
+/** 缺席下标（同 index.html 的 ABSENT）。取值下标恒 >= 0。 */
+const ABSENT = -1;
+
 /** 校验模板 + 数组，返回错误列表（同 index.html 的 validateTemplate）。 */
 function validateTemplate(tpl, slots){
   const errors = [];
   const { found, unclosed } = scanSlots(tpl);
   for (const pos of unclosed) errors.push(`第 ${pos} 个字符处有未闭合的 {{，缺少 }}`);
+
+  const p = parseTpl(tpl);
+  for (const e of p.errors) errors.push(e);
+
   const byName = new Map();
   for (const s of slots){
     const n = (s.name || '').trim();
     if (n) byName.set(n, s);
   }
+
+  // 条件块：块名必须有对应数组，否则块永远不会展开
+  const seenBlock = new Set();
+  walkTpl(p.root, (n) => {
+    if (n.t !== 'block' || seenBlock.has(n.name)) return;
+    seenBlock.add(n.name);
+    if (!byName.has(n.name)) errors.push(`条件块 {{#${n.name}}} 没有对应的数组`);
+    else if (!slotValues(slots, n.name).length) errors.push(`条件块 {{#${n.name}}} 的数组是空的`);
+  });
+
   const seen = new Set();
   for (const f of found){
     const name = f.name.trim();
@@ -206,12 +234,76 @@ function validateTemplate(tpl, slots){
   return errors;
 }
 
-/** 用一组取值渲染最终提示词（同 index.html 的 renderPrompt）。 */
+/** 用一组取值渲染最终提示词（同 index.html 的 renderPrompt）。
+ *  值为 null 表示该槽位本次「缺席」：条件块 {{#名}}…{{/名}} 整块删除，
+ *  裸占位符替换成空串。 */
 function renderPrompt(tpl, combo){
-  return tpl.replace(/\{\{([^{}]*)\}\}/g, (all, name) => {
-    const key = name.trim();
-    return Object.prototype.hasOwnProperty.call(combo, key) ? combo[key] : all;
-  });
+  const has = (k) => Object.prototype.hasOwnProperty.call(combo, k);
+  const emit = (list) => list.map(n => {
+    if (n.t === 'text') return n.s;
+    if (n.t === 'block'){
+      if (has(n.name) && combo[n.name] === null) return '';
+      return emit(n.kids);
+    }
+    const key = n.name.trim();
+    if (!has(key)) return n.raw;
+    const v = combo[key];
+    return v === null ? '' : v;
+  }).join('');
+  return emit(parseTpl(tpl).root);
+}
+
+/* ────────── 模板解析：取值占位符 + 条件块（同 index.html 的 parseTpl） ──────────
+   条件块 {{#名}}…{{/名}}：该槽位缺席时整块（含标签）一起删除。
+   只把 {{名}} 换成空串会让「头饰（可选）：」变成「头饰（可选）：；」，污染提示词。 */
+function parseTpl(tpl){
+  const s = String(tpl || '');
+  const root = [];
+  const stack = [{ kids: root, name: null, start: -1 }];
+  const errors = [];
+  const re = /\{\{([^{}]*)\}\}/g;
+  let m, last = 0;
+
+  while ((m = re.exec(s)) !== null){
+    const at = m.index;
+    if (at > last) stack[stack.length - 1].kids.push({ t: 'text', s: s.slice(last, at) });
+    last = at + m[0].length;
+    const raw = m[1];
+    const nm = raw.trim();
+
+    if (nm.startsWith('#')){
+      const bn = nm.slice(1).trim();
+      if (!bn){ errors.push(`第 ${at} 个字符处的 {{#}} 里没有名称`); continue; }
+      if (!SLOT_NAME_RE.test(bn)){ errors.push(`块名「${bn}」不合法：不能含空格或花括号`); continue; }
+      const node = { t: 'block', name: bn, kids: [], start: at };
+      stack[stack.length - 1].kids.push(node);
+      stack.push(node);
+      continue;
+    }
+    if (nm.startsWith('/')){
+      const bn = nm.slice(1).trim();
+      if (stack.length < 2){ errors.push(`第 ${at} 个字符处的 {{/${bn}}} 没有对应的 {{#${bn}}}`); continue; }
+      const top = stack[stack.length - 1];
+      if (top.name !== bn){ errors.push(`第 ${at} 个字符处的 {{/${bn}}} 与未闭合的 {{#${top.name}}} 不匹配`); continue; }
+      stack.pop();
+      continue;
+    }
+    stack[stack.length - 1].kids.push({ t: 'slot', name: raw, start: at, end: last, raw: m[0] });
+  }
+  if (last < s.length) stack[stack.length - 1].kids.push({ t: 'text', s: s.slice(last) });
+  for (let i = 1; i < stack.length; i++){
+    errors.push(`第 ${stack[i].start} 个字符处的 {{#${stack[i].name}}} 没有闭合的 {{/${stack[i].name}}}`);
+  }
+  return { root, errors };
+}
+
+/** 遍历节点树。 */
+function walkTpl(nodes, cb, path){
+  const p = path || [];
+  for (const n of nodes){
+    cb(n, p);
+    if (n.t === 'block') walkTpl(n.kids, cb, p.concat(n.name));
+  }
 }
 
 /* ────────── 占位符标签：把组合压成「每个标签前 5 个字」 ──────────
@@ -265,11 +357,14 @@ function labelWidths(pools, names, n = LABEL_CHARS){
   });
 }
 
-/** 一组槽下标 → 「标签 · 标签 · …」的短摘要。 */
+/** 一组槽下标 → 「标签 · 标签 · …」的短摘要。缺席显示「—」。 */
 function comboLabels(idxs, pools, widths, n = LABEL_CHARS){
   const last = idxs.length - 1;
   return idxs
-    .map((ix, j) => dpad(labelOf(pools[j][ix], n), j === last ? 0 : widths[j]))
+    .map((ix, j) => {
+      const txt = ix === ABSENT ? '—' : labelOf(pools[j][ix], n);
+      return dpad(txt, j === last ? 0 : widths[j]);
+    })
     .join(LABEL_SEP);
 }
 
@@ -306,6 +401,22 @@ function drawCombos(total, n){
     const vi = get(i), vj = get(j);
     at.set(i, vj); at.set(j, vi);
     out.push(vj);
+  }
+  return out;
+}
+
+/* ────────────────── 带概率的抽样 ──────────────────
+ *  有概率槽位时去重被禁用，所以每张独立：每槽先掷「出现/缺席」，
+ *  出现则均匀抽一个取值，缺席记 ABSENT。
+ *  不能把缺席塞进池子当第 N+1 个取值 —— 那样缺席概率是 1/(N+1)，
+ *  与配置的 p 不符（要精确 p 需要虚拟权重位，非整数）。 */
+function drawProbCombos(pools, probs, n){
+  const out = [];
+  for (let i = 0; i < n; i++){
+    out.push(pools.map((p, j) => {
+      if (probs[j] < 1 && Math.random() >= probs[j]) return ABSENT;
+      return Math.floor(Math.random() * p.length);
+    }));
   }
   return out;
 }
@@ -443,7 +554,8 @@ async function main(){
   let st = null, mode = 'new';
 
   const prevUnfinished = !!(prev && Array.isArray(prev.slots) && prev.slots.length
-    && Array.isArray(prev.done) && prev.done.length < (prev.count || 0));
+    && Array.isArray(prev.done) && prev.done.length < (prev.count || 0)
+    && (Array.isArray(prev.idxRows) || Array.isArray(prev.linears)));   // ★ 无组合数据无法续跑
 
   if (prevUnfinished && o.resume){
     tpl = typeof prev.template === 'string' ? prev.template : tpl;
@@ -501,8 +613,19 @@ async function main(){
   /* 3) 组合空间 */
   const names = [...new Set(scanSlots(tpl).found.map(f => f.name.trim()).filter(Boolean))];
   const pools = names.map(n => slotValues(slots, n));
-  const total = pools.reduce((a, p) => a * p.length, 1);
-  if (!Number.isSafeInteger(total)) fail(`组合总数超出安全整数范围（${total}），无法抽样。`);
+  const probs = names.map(n => slotProb(slots, n));
+  const anyProb = probs.some(p => p < 1);
+  const total = pools.reduce((a, p, i) => a * (probs[i] < 1 ? p.length + 1 : p.length), 1);
+
+  /* ★ 去重规则（与 index.html 的 dedupAllowed 一致）：
+     有概率槽位 → 禁用（去重会扭曲概率分布，且用户既然要概率就接受重复）；
+     组合空间超出精确整数范围 → 禁用（混合进制索引会失真）。
+     两种情况都只是「运行时忽略」，快照里的 skipDup 字段原样保留。 */
+  const dedupAllowed = !anyProb && Number.isSafeInteger(total);
+  if (skipDup && !dedupAllowed){
+    console.log('[提示] 去重已自动禁用：' + (anyProb ? '存在概率占位符' : '组合空间超出精确计算范围'));
+    skipDup = false;
+  }
 
   const count = st ? st.count : (o.count ?? 1);
   if (skipDup && count > total){
@@ -512,9 +635,13 @@ async function main(){
 
   if (!st){
     /* 开新批：生成组合并写入当次完整快照（v2，含模板/数组/参数/反向提示词），
-       让续跑能脱离当前编辑完整复现。 */
+       让续跑能脱离当前编辑完整复现。
+       ★ 有概率槽位时存的是 idxs（可能含 -1 缺席标记），不是线性下标 ——
+         线性下标在缺席概率非 1/(N+1) 时无法表示，只能直接存下标。 */
     const seedBase = o.seed ?? Math.floor(Math.random() * 2147483647);
-    const linears = drawCombos(total, count);
+    const rows = anyProb
+      ? drawProbCombos(pools, probs, count)
+      : drawCombos(total, count);
     st = {
       version: 2,
       stamp: tsStamp(),
@@ -527,7 +654,8 @@ async function main(){
       src: mode,
       params: { w: o.w, h: o.h, steps: o.steps, cfg: o.cfg, sampler: o.sampler, scheduler: o.scheduler },
       neg: o.neg,
-      linears,
+      idxRows: rows,          // 每张的各槽下标（-1 = 缺席）
+      linears: null,          // v2 起用 idxRows；linears 仅为兼容旧快照保留
       done: []
     };
     if (!o.list) saveState(stateFile, st);
@@ -536,15 +664,18 @@ async function main(){
   /* 6) 打印计划 */
   const pad = String(st.count).length;
   const widths = labelWidths(pools, names);
-  const plan = st.linears.map((k, i) => {
-    const idxs = decodeIdxs(k, pools);
+  const plan = (st.idxRows && st.idxRows.length ? st.idxRows : (st.linears || []).map(k => decodeIdxs(k, pools)))
+    .map((idxs, i) => {
     const map = {};
-    names.forEach((n, j) => { map[n] = pools[j][idxs[j]]; });
+    names.forEach((n, j) => {
+      // ABSENT → null：渲染时条件块整块删除
+      map[n] = idxs[j] === ABSENT ? null : pools[j][idxs[j]];
+    });
     const seq = String(i + 1).padStart(Math.max(2, pad), '0');
     const seed = st.seedBase + i;
     const file = `${st.stamp}_t2i_${seq}_seed${seed}.png`;
     return {
-      i, k, idxs, map, seq, seed, file,
+      i, idxs, map, seq, seed, file,
       text: renderPrompt(tpl, map),                 // 出图用（完整提示词）
       label: comboLabels(idxs, pools, widths)       // 终端展示用（标签摘要）
     };
@@ -552,9 +683,9 @@ async function main(){
 
   console.log('');
   console.log('  模板指纹 : ' + st.templateHash);
-  console.log('  占位符   : ' + names.join(' | '));
-  console.log('  各池长度 : ' + pools.map(p => p.length).join(' × '));
-  console.log('  组合总数 : ' + total.toLocaleString('en-US'));
+  console.log('  占位符   : ' + names.map((n, i) => probs[i] < 1 ? `${n}(${Math.round(probs[i]*100)}%)` : n).join(' | '));
+  console.log('  各池长度 : ' + pools.map((p, i) => probs[i] < 1 ? `${p.length}+缺席` : p.length).join(' × '));
+  console.log('  组合总数 : ' + (Number.isSafeInteger(total) ? total.toLocaleString('en-US') : '超出精确范围'));
   console.log('  本批张数 : ' + st.count + (skipDup ? '（不重复）' : '（允许重复）'));
   console.log('  批次模式 : ' + (mode === 'resume' ? '续跑上一次未完成批次' : '开新批次'));
   console.log('  基准 seed: ' + st.seedBase);

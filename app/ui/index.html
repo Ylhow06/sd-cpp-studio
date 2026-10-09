@@ -373,6 +373,13 @@ button.b.sm{padding:5px 8px;font-size:12px}
   flex:1;font-size:12.5px;font-weight:600;padding:5px 9px;background:var(--bg2);
 }
 .slot .sh .cnt{font-size:11px;color:var(--fg3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.slot .sh .pw{display:flex;align-items:center;gap:2px;white-space:nowrap}
+.slot .sh .pw input[type=number]{
+  width:52px;padding:4px 5px;font-size:12px;text-align:right;
+  background:var(--bg3);border:1px solid var(--line);border-radius:6px;color:var(--fg);
+  font-variant-numeric:tabular-nums}
+.slot .sh .pw .pu{font-size:11px;color:var(--fg3)}
+#comboPrev .r i.abs{color:var(--fg3);opacity:.55;font-style:normal}
 .slot .sh button.b{padding:4px 8px;font-size:12px}
 .slot textarea{
   min-height:78px;font-size:12.5px;line-height:1.7;background:var(--bg2);
@@ -790,10 +797,12 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:12px">
             <input type="checkbox" data-f="skipDup" id="skipDup" style="width:auto;margin:0">
             <span>跳过重复组合</span>
+            <span id="skipDupNote" class="v" style="display:none;color:var(--warn,#e0a03c)"></span>
           </label>
           <div class="hint">
             勾选后，同一批内不会出现相同的取值组合，张数不能超过组合总数。
             不勾选则每张独立随机，可能重复。
+            <br>占位符概率存在、或组合空间超出精确计算范围时，去重会被自动禁用。
           </div>
         </div>
 
@@ -1139,34 +1148,141 @@ const BATCH_FACTORY = {
 const SLOT_NAME_RE = /^[^{}\s]+$/;      // 名称：非空、无空格、无花括号
 const CFG_URL = 'http://127.0.0.1:1235'; // 配置服务地址（serve-config.mjs）
 
-/** 扫描模板里的 {{...}}，返回每个占位符的位置与名称。
- *  同时标记「未闭合」的 {{ 位置，供实时标红使用。 */
-function scanSlots(tpl){
-  const found = [];
-  const unclosed = [];
+/* ────────── 模板语法 ──────────
+   取值占位符：{{名称}}            —— 替换成该槽位抽中的取值
+   条件块：    {{#名称}} … {{/名称}} —— 该槽位「缺席」时，整块（含标签）一起删除
+
+   条件块是为了概率功能才有的：槽位可缺席时，若只把 {{头饰}} 换成空串，
+   模板里「头饰（可选）：」这串标签会留在原地变成「头饰（可选）：；」，
+   污染提示词。把标签包进条件块，缺席时连标签一起消失。
+
+   节点：{t:'text',s} | {t:'slot',name,start,end,raw} | {t:'block',name,kids,start} */
+
+/** 解析模板为节点树。同时收集块配对错误与「未闭合的 {{」。 */
+function parseTpl(tpl){
+  const s = String(tpl || '');
+  const root = [];
+  const stack = [{ kids: root, name: null, start: -1 }];
+  const errors = [];
+  const spans = [];          // 所有已配对 token 的区间，用于找未闭合的 {{
   const re = /\{\{([^{}]*)\}\}/g;
-  let m;
-  while ((m = re.exec(tpl)) !== null){
-    found.push({ name: m[1], start: m.index, end: m.index + m[0].length, raw: m[0] });
+  let m, last = 0;
+
+  while ((m = re.exec(s)) !== null){
+    const at = m.index;
+    if (at > last) stack[stack.length - 1].kids.push({ t: 'text', s: s.slice(last, at) });
+    last = at + m[0].length;
+    spans.push([at, last]);
+
+    const raw = m[1];
+    const nm = raw.trim();
+
+    if (nm.startsWith('#')){
+      const bn = nm.slice(1).trim();
+      if (!bn){ errors.push({ kind: 'badblock', pos: at, msg: `第 ${at} 个字符处的 {{#}} 里没有名称` }); continue; }
+      if (!SLOT_NAME_RE.test(bn)){ errors.push({ kind: 'badname', pos: at, msg: `块名「${bn}」不合法：不能含空格或花括号` }); continue; }
+      const node = { t: 'block', name: bn, kids: [], start: at };
+      stack[stack.length - 1].kids.push(node);
+      stack.push(node);
+      continue;
+    }
+
+    if (nm.startsWith('/')){
+      const bn = nm.slice(1).trim();
+      if (stack.length < 2){
+        errors.push({ kind: 'badclose', pos: at, msg: `第 ${at} 个字符处的 {{/${bn}}} 没有对应的 {{#${bn}}}` });
+        continue;
+      }
+      const top = stack[stack.length - 1];
+      if (top.name !== bn){
+        errors.push({ kind: 'badclose', pos: at, msg: `第 ${at} 个字符处的 {{/${bn}}} 与未闭合的 {{#${top.name}}} 不匹配` });
+        continue;
+      }
+      stack.pop();
+      continue;
+    }
+
+    stack[stack.length - 1].kids.push({ t: 'slot', name: raw, start: at, end: last, raw: m[0] });
   }
-  // 找未闭合的 {{：去掉已配对的区间后，若还残留 {{ 就是未闭合
-  let rest = tpl;
-  for (let i = found.length - 1; i >= 0; i--){
-    const f = found[i];
-    rest = rest.slice(0, f.start) + ' '.repeat(f.end - f.start) + rest.slice(f.end);
+
+  if (last < s.length) stack[stack.length - 1].kids.push({ t: 'text', s: s.slice(last) });
+
+  for (let i = 1; i < stack.length; i++){
+    errors.push({ kind: 'unclosedblock', pos: stack[i].start, msg: `第 ${stack[i].start} 个字符处的 {{#${stack[i].name}}} 没有闭合的 {{/${stack[i].name}}}` });
+  }
+
+  // 找未闭合的 {{：把已配对的区间挖空后，残留的 {{ 就是未闭合
+  const unclosed = [];
+  let rest = s;
+  for (let i = spans.length - 1; i >= 0; i--){
+    const [a, b] = spans[i];
+    rest = rest.slice(0, a) + ' '.repeat(b - a) + rest.slice(b);
   }
   let idx;
   while ((idx = rest.indexOf('{{')) !== -1){
     unclosed.push(idx);
     rest = rest.slice(0, idx) + '  ' + rest.slice(idx + 2);
   }
-  return { found, unclosed };
+
+  return { root, errors, unclosed };
+}
+
+/** 深度优先遍历节点树。cb(node, blockPath) —— blockPath 是祖先块名数组。 */
+function walkTpl(nodes, cb, path){
+  const p = path || [];
+  for (const n of nodes){
+    cb(n, p);
+    if (n.t === 'block') walkTpl(n.kids, cb, p.concat(n.name));
+  }
+}
+
+/** 扫描模板里的取值占位符与条件块。
+ *  返回 { found, unclosed, blocks, errors }：
+ *    found   取值占位符（不含块标记），带所在块路径，供校验与组合计算
+ *    blocks  条件块节点，供「有概率的槽位是否包了块」这类校验 */
+function scanSlots(tpl){
+  const p = parseTpl(tpl);
+  const found = [];
+  const blocks = [];
+  walkTpl(p.root, (n, path) => {
+    if (n.t === 'slot') found.push({ name: n.name, start: n.start, end: n.end, raw: n.raw, blocks: path });
+    else if (n.t === 'block') blocks.push({ name: n.name, start: n.start, blocks: path });
+  });
+  return { found, unclosed: p.unclosed, blocks, errors: p.errors };
+}
+
+/** 槽位出现概率：缺省 / 非法 → 1（必选）。只有 0<p<1 才是有意义的可选。 */
+function slotProb(slots, name){
+  const s = (slots || []).find(x => (x.name || '').trim() === name);
+  if (!s) return 1;
+  const n = Number(s.p);
+  return (Number.isFinite(n) && n > 0 && n < 1) ? n : 1;
+}
+
+/** 模板实际引用到的槽位里，是否存在「可选」（0<p<1）的。
+ *  ★ 只算被引用的槽位 —— 定义了却没在模板里用到的槽位不参与判定（不影响输出）。 */
+function hasProbSlots(slots, tpl){
+  const { found } = scanSlots(tpl || '');
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  return names.some(n => slotProb(slots, n) < 1);
+}
+
+/** 去重是否可用：无概率槽位 且 组合总数在精确整数范围内。
+ *  两个条件都是硬条件 —— 有概率则去重会扭曲概率分布；超范围则混合进制索引失真。 */
+function dedupAllowed(slots, tpl){
+  if (hasProbSlots(slots, tpl)) return false;
+  return Number.isSafeInteger(comboCount(slots, tpl));
+}
+
+/** 本次实际生效的去重开关（字段值 && 可用）。字段本身永远原样保留。 */
+function effectiveDedup(slots, tpl, skipDupField){
+  return !!skipDupField && dedupAllowed(slots, tpl);
 }
 
 /** 校验模板 + 数组，返回错误列表。空数组也算未匹配。 */
 function validateTemplate(tpl, slots){
   const errors = [];
-  const { found, unclosed } = scanSlots(tpl);
+  const { found, unclosed, blocks } = scanSlots(tpl);
 
   for (const pos of unclosed){
     errors.push({ kind: 'unclosed', pos, msg: `第 ${pos} 个字符处有未闭合的 {{，缺少 }}` });
@@ -1176,6 +1292,18 @@ function validateTemplate(tpl, slots){
   for (const s of slots){
     const n = (s.name || '').trim();
     if (n) byName.set(n, s);
+  }
+
+  // 条件块：块名必须有对应数组，否则块永远不会展开
+  const seenBlock = new Set();
+  for (const b of blocks){
+    if (seenBlock.has(b.name)) continue;
+    seenBlock.add(b.name);
+    if (!byName.has(b.name)){
+      errors.push({ kind: 'missing', pos: b.start, msg: `条件块 {{#${b.name}}} 没有对应的数组` });
+    } else if (!slotValues(slots, b.name).length){
+      errors.push({ kind: 'emptyarr', pos: b.start, msg: `条件块 {{#${b.name}}} 的数组是空的` });
+    }
   }
 
   const seen = new Set();
@@ -1207,7 +1335,7 @@ function validateTemplate(tpl, slots){
   const usedNames = new Set(found.map(f => f.name.trim()));
   const unused = slots.map(s => (s.name || '').trim()).filter(n => n && !usedNames.has(n));
 
-  return { errors, unused, found, unclosed };
+  return { errors, unused, found, unclosed, blocks };
 }
 
 /** 取某个占位符的候选值（已过滤空行）。 */
@@ -1217,7 +1345,8 @@ function slotValues(slots, name){
   return (s.values || []).map(v => String(v).trim()).filter(v => v !== '');
 }
 
-/** 组合总数 = 各数组长度之积。任一为空 → 0。 */
+/** 组合总数 = 各数组长度之积（可选的槽位算 N+1：present 各一种 + 缺席一种）。
+ *  任一为空 → 0。 */
 function comboCount(slots, tpl){
   const { found } = scanSlots(tpl || '');
   const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
@@ -1226,17 +1355,39 @@ function comboCount(slots, tpl){
   for (const name of names){
     const vals = slotValues(slots, name);
     if (!vals.length) return 0;
-    n *= vals.length;
+    n *= (slotProb(slots, name) < 1) ? (vals.length + 1) : vals.length;
   }
   return n;
 }
 
-/** 用一组取值渲染最终提示词。combo 是 {名称: 值} 映射。 */
+/** 解析结果缓存：模板不变就不重复解析（长模板 + 上千张时省开销）。 */
+let TPL_NODE_CACHE = { src: null, root: null };
+function tplNodes(tpl){
+  const s = String(tpl || '');
+  if (TPL_NODE_CACHE.src === s) return TPL_NODE_CACHE.root;
+  const root = parseTpl(s).root;
+  TPL_NODE_CACHE = { src: s, root };
+  return root;
+}
+
+/** 用一组取值渲染最终提示词。combo 是 {名称: 值} 映射。
+ *  值为 null 表示该槽位本次「缺席」：
+ *    · 条件块 {{#名称}}…{{/名称}} → 整块（含标签）删除
+ *    · 裸占位符                    → 替换成空串（校验会提示包块，避免留下空标签） */
 function renderPrompt(tpl, combo){
-  return tpl.replace(/\{\{([^{}]*)\}\}/g, (all, name) => {
-    const key = name.trim();
-    return Object.prototype.hasOwnProperty.call(combo, key) ? combo[key] : all;
-  });
+  const has = (k) => Object.prototype.hasOwnProperty.call(combo, k);
+  const emit = (list) => list.map(n => {
+    if (n.t === 'text') return n.s;
+    if (n.t === 'block'){
+      if (has(n.name) && combo[n.name] === null) return '';
+      return emit(n.kids);
+    }
+    const key = n.name.trim();
+    if (!has(key)) return n.raw;
+    const v = combo[key];
+    return v === null ? '' : v;
+  }).join('');
+  return emit(tplNodes(tpl));
 }
 
 /* ── 不重复抽样：惰性 Fisher–Yates（稀疏交换位）──
@@ -1347,7 +1498,17 @@ function samplerSync(sig, total, pools, used){
   }
 }
 
-/** 随机取一组组合。skipDup 时保证与 used 里的都不重复。 */
+/** 缺席下标。取值下标恒 >= 0，用它标记「本次不出现」。
+ *  ★ 绝不能用空字符串表示缺席 —— slotValues 会 filter(v=>v!=='') 把它吞掉。 */
+const ABSENT = -1;
+
+/** 某槽位本张是否出现。必选槽恒出现（p=1）。 */
+function rollPresent(p){
+  return p >= 1 ? true : Math.random() < p;
+}
+
+/** 随机取一组组合。skipDup 时保证与 used 里的都不重复。
+ *  ★ 调用方必须保证 skipDup 只在 dedupAllowed 时传 true（有概率槽位时禁用去重）。 */
 function pickCombo(slots, tpl, used, skipDup){
   const { found } = scanSlots(tpl || '');
   const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
@@ -1356,13 +1517,16 @@ function pickCombo(slots, tpl, used, skipDup){
   const pools = names.map(n => slotValues(slots, n));
   if (pools.some(p => !p.length)) return null;
 
-  const total = pools.reduce((a, p) => a * p.length, 1);
+  const probs = names.map(n => slotProb(slots, n));
 
-  // 不跳过重复：直接随机
+  // 不跳过重复：每槽独立掷「出现/缺席」，出现则均匀抽一个取值
   if (!skipDup){
-    const idxs = pools.map(p => Math.floor(Math.random() * p.length));
+    const idxs = pools.map((p, i) => rollPresent(probs[i]) ? Math.floor(Math.random() * p.length) : ABSENT);
     return buildCombo(names, pools, idxs);
   }
+
+  // 去重路径：必然全必选（有概率时调用方已禁用去重），缺席维度不参与索引
+  const total = pools.reduce((a, p) => a * p.length, 1);
 
   // 组合空间超出安全整数（2^53）时线性索引不再可靠，退回重试法。
   // 这种量级下 n/√total 小到可忽略，实际碰撞概率为 0。
@@ -1385,7 +1549,10 @@ function pickCombo(slots, tpl, used, skipDup){
 
 function buildCombo(names, pools, idxs){
   const map = {};
-  names.forEach((n, i) => { map[n] = pools[i][idxs[i]]; });
+  names.forEach((n, i) => {
+    // ABSENT → null：渲染时条件块整块删除；预览时显示「—」
+    map[n] = idxs[i] === ABSENT ? null : pools[i][idxs[i]];
+  });
   return { map, idxs, key: idxs.join('|') };
 }
 
@@ -3051,8 +3218,19 @@ function saveBatchPane(){
     if (!b.slots[i]) return;
     const ni = el.querySelector('[data-slotname]');
     const nv = el.querySelector('[data-slotvals]');
+    const pv = el.querySelector('[data-slotprob]');
     if (ni) b.slots[i].name = ni.value;
     if (nv) b.slots[i].values = nv.value.split('\n').map(x => x.trim()).filter(x => x !== '');
+    if (pv){
+      // p 允许范围 (0,1]，禁止 0：0 概率是死配置（槽位永不出现），没有意义。
+      let pct = Math.round(+pv.value || 100);
+      if (pct < 1) pct = 1;
+      if (pct > 100) pct = 100;
+      const p = pct / 100;
+      if (p >= 1) delete b.slots[i].p;      // 100% = 必选 = 不落盘字段
+      else b.slots[i].p = p;
+      if (String(pct) !== pv.value && document.activeElement !== pv) pv.value = String(pct);
+    }
   });
 }
 
@@ -3091,6 +3269,30 @@ function renderSlotEditor(){
     cnt.className = 'cnt';
     cnt.textContent = `${(s.values || []).length} 条`;
 
+    // 出现概率：1%~100%，100% = 必选（= 不写 p 字段）
+    const pw = document.createElement('span');
+    pw.className = 'pw';
+    const pi = document.createElement('input');
+    pi.type = 'number';
+    pi.setAttribute('data-slotprob', '');
+    pi.min = '1'; pi.max = '100'; pi.step = '1';
+    pi.value = String(Math.round(slotProb(b.slots, s.name) * 100));
+    pi.title = '该占位符在每张图里出现的概率。100% = 必选（默认）。';
+    pi.oninput = () => { onSlotEdit(); };
+    const pu = document.createElement('span');
+    pu.className = 'pu';
+    pu.textContent = '%';
+    const po = document.createElement('button');
+    po.className = 'b sm';
+    po.textContent = '可选';
+    po.title = '一键设为 50%（可选）';
+    po.onclick = () => {
+      pi.value = '50';
+      saveBatchPane();
+      renderSlotEditor(); renderTplTags(); syncBatchLabels(); cfgSaveDebounced();
+    };
+    pw.append(pi, pu, po);
+
     const del = document.createElement('button');
     del.className = 'b sm';
     del.textContent = '🗑';
@@ -3102,7 +3304,7 @@ function renderSlotEditor(){
       renderSlotEditor(); renderTplTags(); syncBatchLabels(); cfgSaveDebounced();
     };
 
-    sh.append(ni, cnt, del);
+    sh.append(ni, cnt, pw, del);
 
     const nv = document.createElement('textarea');
     nv.setAttribute('data-slotvals', '');
@@ -3488,24 +3690,49 @@ function syncBatchLabels(){
   const hint = $('#comboHint');
   const n = Math.max(1, +b.count || 1);
 
-  if (num) num.textContent = total ? total.toLocaleString('en-US') : '—';
+  const prob = hasProbSlots(b.slots, b.template);
+  const safe = Number.isSafeInteger(total);
+  const dedup = effectiveDedup(b.slots, b.template, b.skipDup);   // 实际生效
+  const blocked = !!b.skipDup && !dedup;                          // 勾了但被禁用
 
-  const over = b.skipDup && total > 0 && n > total;
+  // 组合总数：溢出时不再打印失真数字/Infinity
+  if (num){
+    if (!total) num.textContent = '—';
+    else if (!safe) num.textContent = '超出精确范围';
+    else num.textContent = total.toLocaleString('en-US');
+  }
+
+  const over = dedup && total > 0 && n > total;
   if (line) line.classList.toggle('over', over);
 
   if (hint){
     if (!total) hint.textContent = '模板里还没有可用的占位符';
     else if (over) hint.textContent = `张数超过组合数，最多 ${total} 张`;
-    else if (b.skipDup) hint.textContent = `不重复，最多可出 ${total} 张`;
-    else hint.textContent = `每张独立随机（允许重复）`;
+    else if (dedup) hint.textContent = `不重复，最多可出 ${total} 张`;
+    else hint.textContent = '每张独立随机（允许重复）';
   }
 
-  // 张数警告
+  // 去重开关：显示文件里的真实值，被禁用时置灰并注明原因
+  const sd = fld('batch', 'skipDup');
+  const note = $('#skipDupNote');
+  if (sd){
+    sd.checked = !!b.skipDup;
+    sd.disabled = !dedupAllowed(b.slots, b.template);
+  }
+  if (note){
+    note.textContent = blocked
+      ? (prob ? '已禁用（存在概率占位符，去重会扭曲概率分布）'
+              : '已禁用（组合空间超出精确计算范围）')
+      : '';
+    note.style.display = blocked ? '' : 'none';
+  }
+
+  // 张数警告：生效去重时才提示「超过组合数」
   const warn = $('#countWarn');
   if (warn){
     let msg = '';
     if (over) msg = `⚠ 已勾选「跳过重复组合」，张数不能超过组合总数 ${total}。`;
-    else if (total && n > total) msg = `注意：组合只有 ${total} 种，出 ${n} 张必然出现重复组合。`;
+    else if (dedup && total && n > total) msg = `注意：组合只有 ${total} 种，出 ${n} 张必然出现重复组合。`;
     warn.textContent = msg;
     warn.classList.toggle('show', !!msg);
   }
@@ -3553,18 +3780,21 @@ function renderComboPreview(total){
   }
 
   // ★ 抽出全部 n 条（跳过重复时为不重复抽样），作为本批的唯一依据
+  const dedup = effectiveDedup(b.slots, b.template, b.skipDup);
   const rows = [];
   const used = [];
   for (let i = 0; i < n; i++){
-    const c = pickCombo(b.slots, b.template, b.skipDup ? used : null, !!b.skipDup);
+    const c = pickCombo(b.slots, b.template, dedup ? used : null, dedup);
     if (!c) break;
-    if (b.skipDup) used.push(c.key);
+    if (dedup) used.push(c.key);
     rows.push(c);
   }
   S.b.preview = rows;
 
   box.innerHTML = rows.slice(0, showN).map((c, i) => {
-    const parts = names.map(nm => `<i>${escapeHtml(c.map[nm])}</i>`);
+    const parts = names.map(nm => c.map[nm] === null
+      ? `<i class="abs" title="本次不出现">—</i>`
+      : `<i>${escapeHtml(c.map[nm])}</i>`);
     return `<div class="r"><u>${String(i+1).padStart(2,'0')}</u> ${parts.join(' · ')}</div>`;
   }).join('') || '<div class="r">无法生成预览</div>';
 }
@@ -3575,10 +3805,15 @@ function ensurePreview(){
   const b = S.m.batch;
   const n = Math.max(1, +b.count || 1);
   const total = comboCount(b.slots, b.template);
-  const want = b.skipDup && total ? Math.min(n, total) : n;
+  // ★ 用「实际生效」的去重状态判断，不能用字段值 ——
+  //   有概率槽位时字段可能仍是 true，但去重已被禁用，
+  //   若照字段走，Math.min(n, total) 会在 total 失真/Infinity 时砍错预览张数，
+  //   导致「预览」与「实际生成」张数对不上。
+  const dedup = effectiveDedup(b.slots, b.template, b.skipDup);
+  const want = dedup && total ? Math.min(n, total) : n;
   const has = S.b.preview || [];
-  // 张数对不上，或勾选跳重时出现重复 → 重算
-  const dupBad = b.skipDup && new Set(has.map(c => c.key)).size !== has.length;
+  // 张数对不上，或生效去重时出现重复 → 重算
+  const dupBad = dedup && new Set(has.map(c => c.key)).size !== has.length;
   const mismatch = has.length !== want;
   if (mismatch || dupBad || !has.length){
     renderComboPreview();
@@ -3598,6 +3833,7 @@ function comboAt(i){
   if (row.length !== names.length) return null;
   const map = {};
   for (let k = 0; k < names.length; k++){
+    if (row[k] === ABSENT){ map[names[k]] = null; continue; }   // 缺席（旧计划无 -1，不受影响）
     const v = pools[k][row[k]];
     if (v === undefined) return null;
     map[names[k]] = v;
@@ -3717,7 +3953,8 @@ function buildCliJob(){
   if (!total){ alert('还没有可用的占位符组合。'); return null; }
 
   const n = Math.max(1, Math.floor(+b.count || 1));
-  if (b.skipDup && n > total){
+  const dedup = effectiveDedup(b.slots, b.template, b.skipDup);
+  if (dedup && n > total){
     alert(`已勾选「跳过重复组合」，张数不能超过组合总数 ${total}。\n请把张数改成 ${total} 或更少。`);
     return null;
   }
@@ -3912,7 +4149,8 @@ async function generateBatch(){
   if (!total){ alert('还没有可用的占位符组合。'); return; }
 
   const n = Math.max(1, Math.floor(+b.count || 1));
-  if (b.skipDup && n > total){
+  const dedup = effectiveDedup(b.slots, b.template, b.skipDup);
+  if (dedup && n > total){
     alert(`已勾选「跳过重复组合」，张数不能超过组合总数 ${total}。\n请把张数改成 ${total} 或更少。`);
     return;
   }
@@ -3921,7 +4159,7 @@ async function generateBatch(){
   //   若预览与当前设置不同步，ensurePreview 会先重算。
   const combos = ensurePreview();
   if (!combos.length){ alert('无法生成本批的组合列表，请检查模板与数组。'); return; }
-  if (combos.length < n && b.skipDup){
+  if (dedup && combos.length < n){
     alert(`可用的不重复组合只有 ${combos.length} 种，少于设定的 ${n} 张。`);
     return;
   }
@@ -3944,6 +4182,7 @@ async function generateBatch(){
   // 新建计划
   S.b.plan = {
     id: 'batch-' + Date.now(),
+    v: 2,                      // 格式版本：v2 的 combos 里可能出现 -1（缺席标记）
     status: 'running',
     total: actualN,
     cursor: 0,

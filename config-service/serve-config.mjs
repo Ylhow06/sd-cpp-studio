@@ -358,7 +358,7 @@ function sanitize(cfg) {
     const values = Array.isArray(s.values)
       ? s.values.filter((v) => typeof v === 'string')
       : [];
-    slots.push({ name, values });
+    slots.push(withProb({ name, values }, s.p));
   }
 
   const out = {
@@ -377,6 +377,19 @@ function sanitize(cfg) {
     plan: cfg.plan && typeof cfg.plan === 'object' ? cfg.plan : null
   };
   return out;
+}
+
+/* ────────── 占位符出现概率 ──────────
+   槽位可选字段 p：该占位符在每张图里「出现」的概率。
+      · 缺省 / 非法值  → 视为 1（必选），字段不落盘
+      · p ∈ (0, 1)     → 可选，保留字段（0 < p < 1 才会禁用去重）
+      · p <= 0 / p >= 1 → 归一化掉（p>=1 与必选等价；0 概率是死配置，由 UI 拦）
+   校验放这里是因为 sanitize 是白名单重建 —— 不加这一步，概率会在每次
+   保存时被静默丢弃（界面正常、落盘即失效）。 */
+function withProb(slot, p) {
+  const n = Number(p);
+  if (Number.isFinite(n) && n > 0 && n < 1) slot.p = n;
+  return slot;
 }
 
 /* ────────── 用户模板库 ──────────
@@ -401,7 +414,7 @@ function sanitizeTplSlots(raw) {
     const values = Array.isArray(s.values)
       ? s.values.filter((v) => typeof v === 'string').slice(0, TPL_VALUES_MAX)
       : [];
-    out.push({ name, values });
+    out.push(withProb({ name, values }, s.p));
   }
   return out;
 }
