@@ -365,16 +365,35 @@ button.b.sm{padding:5px 8px;font-size:12px}
 #tplWarn .li{margin-top:3px}
 #tplWarn .li:first-child{margin-top:0}
 
-/* 模板里识别出的占位符标记 */
+/* 模板里识别出的占位符标记。
+   三态（见 tplTagItems）：
+     亮（无附加类）= 已配置 + 已使用，点击追加
+     .off          = 已配置 + 未使用，置暗，点击追加
+     .miss         = 已使用 + 未配置/空数组，置红，点击去新增编辑 */
 #tplTags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
 #tplTags .tg{
   font-size:11px;padding:3px 8px;border-radius:12px;border:1px solid var(--line);
   background:var(--bg);color:var(--fg2);cursor:pointer;transition:.15s;
 }
 #tplTags .tg:hover{border-color:var(--acc);color:var(--fg)}
-#tplTags .tg.miss{border-color:rgba(248,81,73,.5);color:#ffb3ae}
 #tplTags .tg b{color:var(--acc2);font-weight:600}
 #tplTags .tg .n{color:var(--fg3);margin-left:4px;font-variant-numeric:tabular-nums}
+
+/* 未使用：置暗（虚框 + 降级字色，悬停时回到可用观感） */
+#tplTags .tg.off{border-style:dashed;color:var(--fg3)}
+#tplTags .tg.off b{color:var(--fg3);font-weight:400}
+#tplTags .tg.off:hover{border-style:solid;border-color:var(--acc2);color:var(--fg2)}
+#tplTags .tg.off:hover b{color:var(--fg2)}
+
+/* 已使用但没配置（或数组为空）：置红，点击去新增/编辑 */
+#tplTags .tg.miss{border-color:rgba(248,81,73,.5);color:#ffb3ae}
+#tplTags .tg.miss b{color:#ffb3ae}
+#tplTags .tg.miss:hover{border-color:var(--err);color:#ffc9c5}
+/* 点击标签 = 追加到模板末尾。给一下即时反馈：
+   标签会被 renderTplTags 重建，所以 flash 类是在重建之后补挂的（见 appendSlotToTpl）。 */
+#tplTags .tg:active{transform:scale(.95)}
+#tplTags .tg.flash{border-color:var(--ok);color:var(--ok);transition:none}
+#tplTags .tg.flash b{color:var(--ok)}
 
 /* ── 模板写法速查（折叠）──
    条件块 {{#名}}…{{/名}} 是概率功能配套的语法，之前只写在源码注释与文档里，
@@ -979,6 +998,10 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <div class="hint">
             占位符写作 <b style="color:var(--fg2)">{{名称}}</b>，可用中文、不可含空格。
             同一个占位符在一张图里只会取一个值。
+            <br>下面的标签覆盖<b style="color:var(--fg2)">全部占位符</b>（含还没用到的）：
+            点<b style="color:var(--fg2)">亮</b>的或<b style="color:var(--fg3)">暗</b>的会把
+            <b style="color:var(--fg2)">{{名称}}</b> 追加到模板末尾，重复点就重复追加；
+            点<b style="color:#ffb3ae">红</b>的（模板用了但没配置）会打开取值编辑器去补内容。
           </div>
           <div class="row" style="margin-top:9px">
             <button class="b sm" id="tplInsert">＋ 插入占位符</button>
@@ -4058,31 +4081,175 @@ function slotIsUsed(name){
 
 /* ────────── 模板标记 + 校验显示 ────────── */
 
+/** 算出标签行要显示的三类占位符。
+ *
+ *  标签行 = 【模板里用到的】∪【已配置数组的】，两者取并集后分类：
+ *
+ *    state 'ok'   已使用 + 有取值        → 亮，点击追加
+ *    state 'off'  未使用（不管有无取值）  → 暗，点击追加
+ *    state 'miss' 已使用 + 没取值        → 红，点击去新增/编辑
+ *
+ *  ★ 为什么必须是并集：只列「用到的」就看不到「配了但没用」的数组
+ *    （用户没法发现它、也没法点它插进模板）；只列「配了的」就看不到
+ *    模板里引用了但还没建数组的名字（那是要报错的）。
+ *
+ *  ★ 「没取值」= 数组不存在，或存在但为空。「空数组」在【已使用】时必须
+ *    按红处理 —— 它过不了校验、出不了图，用户得去补内容。
+ *    但在【未使用】时按暗处理：那只是个还没写完的草稿，不是错误状态，
+ *    标红会让「刚点＋新增」的槽位看起来像出错了。
+ *    （暗的点了追加 → 变成已使用 → 若仍为空则自动转红，路径是自洽的。）
+ *
+ *  ★ 排序：先按「模板里的出现顺序」，再补上剩余的未使用项（按数组顺序）。
+ *    这样标签行的顺序与模板读起来一致，未使用的排在后面不干扰视线。 */
+function tplTagItems(tpl, slots){
+  const { found } = scanSlots(tpl || '');
+  const usedOrder = [];
+  const usedSet = new Set();
+  for (const f of found){
+    const n = f.name.trim();
+    if (!n || usedSet.has(n)) continue;
+    usedSet.add(n);
+    usedOrder.push(n);
+  }
+
+  const byName = new Map();
+  for (const s of (slots || [])){
+    const n = (s.name || '').trim();
+    if (n && !byName.has(n)) byName.set(n, s);
+  }
+
+  const items = [];
+  for (const n of usedOrder){
+    const s = byName.get(n);
+    const cnt = s ? slotValues(slots, n).length : 0;
+    items.push({ name: n, used: true, configured: !!s && cnt > 0, count: cnt,
+                 state: cnt > 0 ? 'ok' : 'miss' });
+  }
+  for (const [n, s] of byName){
+    if (usedSet.has(n)) continue;
+    const cnt = slotValues(slots, n).length;
+    items.push({ name: n, used: false, configured: cnt > 0, count: cnt, state: 'off' });
+  }
+  return items;
+}
+
 function renderTplTags(){
   const box = $('#tplTags');
   if (!box) return;
   const tpl = S.m.batch.template || '';
-  const { found } = scanSlots(tpl);
-  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  const slots = S.m.batch.slots || [];
+  const items = tplTagItems(tpl, slots);
   box.innerHTML = '';
 
-  if (!names.length) return;
+  if (!items.length) return;
 
-  names.forEach(n => {
-    const vals = slotValues(S.m.batch.slots, n);
+  items.forEach(it => {
+    const n = it.name;
+    const vals = slotValues(slots, n);
     const tg = document.createElement('span');
-    tg.className = 'tg' + (vals.length ? '' : ' miss');
-    tg.innerHTML = `<b>{{${n}}}</b><span class="n">${vals.length ? vals.length + ' 条' : '缺数组'}</span>`;
-    tg.title = vals.length ? `候选：${vals.slice(0, 8).join(' / ')}${vals.length > 8 ? ' …' : ''}` : '没有对应数组或数组为空';
-    tg.onclick = () => {
-      const el = $$('#slotList .slot').find(x => {
-        const s = S.m.batch.slots[+x.dataset.i];
-        return s && (s.name || '').trim() === n;
-      });
-      if (el){ el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.querySelector('[data-slotvals]')?.focus(); }
-    };
+    tg.className = 'tg' + (it.state === 'ok' ? '' : ' ' + it.state);
+    tg.dataset.name = n;
+    tg.dataset.state = it.state;
+
+    // 角标文案：红色才说「缺数组」（那是错误状态）；暗的草稿说「0 条」即可
+    const meta = it.state === 'miss' ? '缺数组' : `${vals.length} 条`;
+    tg.innerHTML = `<b>{{${n}}}</b><span class="n">${meta}</span>`;
+
+    if (it.state === 'miss'){
+      // 红色：模板引用了但没配置好 → 点了去建数组 / 补内容
+      tg.title = `模板里用了 {{${n}}}，但没有对应的数组（或数组是空的）\n`
+               + '点击去新增 / 编辑它的取值';
+      tg.onclick = () => editSlotByName(n);
+    } else if (it.state === 'off'){
+      // 暗色：配了但模板还没用到 → 点了插进模板
+      tg.title = `点击把 {{${n}}} 追加到模板末尾\n`
+               + (it.count ? `（这个占位符还没在模板里用到）\n候选：${vals.slice(0, 8).join(' / ')}${vals.length > 8 ? ' …' : ''}`
+                           : '（这个占位符还没填取值）');
+      tg.onclick = () => appendSlotToTpl(n);
+    } else {
+      tg.title = `点击把 {{${n}}} 追加到模板末尾\n`
+               + `候选：${vals.slice(0, 8).join(' / ')}${vals.length > 8 ? ' …' : ''}`;
+      tg.onclick = () => appendSlotToTpl(n);
+    }
     box.appendChild(tg);
   });
+}
+
+/** 打开占位符弹窗并定位到指定名字的槽位。
+ *  名字不存在（模板里引用了但没配置）→ 直接新建一个同名槽位再定位，
+ *  这样「点了去新增编辑」是一步到位的，不用用户自己再手打一遍名字。 */
+function editSlotByName(name){
+  const n = String(name || '').trim();
+  if (!n) return;
+  saveBatchPane();
+
+  const slots = S.m.batch.slots;
+  let i = slots.findIndex(s => (s.name || '').trim() === n);
+  if (i < 0){
+    // 不存在 → 建一个同名空槽，省掉「新建 → 手打名字」两步
+    slots.push({ name: n, values: [] });
+    i = slots.length - 1;
+  }
+  slotDlgIndex = i;
+
+  renderSlotEditor();
+  renderTplTags();
+  syncBatchLabels();
+  validateBatch();
+  cfgSaveDebounced();
+
+  openSlotDlg();
+  // 空数组时把光标放进取值框，直接就能开始填
+  setTimeout(() => {
+    const ta = $('#slotDlgVals');
+    if (ta && !ta.value.trim()) ta.focus();
+    else { const nm = $('#slotDlgName'); if (nm){ nm.focus(); nm.select(); } }
+  }, 0);
+}
+
+/** 点击占位符标签 → 把 {{名称}} 追加到模板末尾。
+ *
+ *  ★ 这里**故意不判断是否已存在**。重复点击就重复追加 —— 这是明确要的
+ *    行为：同名占位符在一张图里取同一个值，重复出现是合法的
+ *    （往末尾重复写一遍，等于提高该维度在提示词里的权重）。
+ *
+ *  ★ 旧行为（占位符弹窗重构之前）是滚动到 #slotList 里对应的槽位并聚焦它。
+ *    重构后 #slotList 变成 `hidden` 的「真相容器」，对隐藏元素做
+ *    scrollIntoView / focus 都不生效 —— 表现为「点了没反应」。
+ *    所以这里整段重写，不再依赖那个容器。
+ *  ★ 红色标签（模板引用了但没配置）不走这里，走 editSlotByName()。 */
+function appendSlotToTpl(name){
+  const n = String(name || '').trim();
+  if (!n) return;
+  const ta = fld('batch', 'template');
+  if (!ta) return;
+
+  const txt = `{{${n}}}`;
+  ta.value = ta.value + txt;                 // 追加到末尾
+  // 光标停在末尾，方便接着手动改
+  ta.selectionStart = ta.selectionEnd = ta.value.length;
+  ta.scrollTop = ta.scrollHeight;
+  ta.focus();
+
+  // 与「＋ 插入占位符」同一条写回路径，保证状态/DOM 不脱节
+  S.m.batch.template = ta.value;
+  renderTplTags();
+  syncBatchLabels();
+  validateBatch();
+  cfgSaveDebounced();
+
+  // ★ 必须在 renderTplTags 之后补高亮：它会重建整行，先挂的类会被丢掉
+  flashTplTag(n);
+}
+
+/** 给某个占位符标签加一下短暂高亮，作为「确实追加了」的反馈。 */
+function flashTplTag(name){
+  const box = $('#tplTags');
+  if (!box) return;
+  const tg = [...box.querySelectorAll('.tg')].find(el => el.dataset.name === name);
+  if (!tg) return;
+  tg.classList.add('flash');
+  setTimeout(() => tg.classList.remove('flash'), 650);
 }
 
 /** 校验当前模板 + 数组。返回 {errors, unused, warns}，并把结果显示到 UI。

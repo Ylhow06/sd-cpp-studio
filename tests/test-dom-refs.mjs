@@ -36,7 +36,7 @@ for (const m of markup.matchAll(/\bid="([^"]+)"/g)) definedIds.add(m[1]);
 /* ★ 运行时动态创建的 id：不在静态 HTML 里，但确实由脚本自己建出来。
    这里是显式白名单 —— 只加「确定是动态创建」的，别拿它掩盖打错的 id。
    当前全部来自占位符弹窗（编辑器是渲染时建的，不是写死在 HTML 里）。 */
-const DYNAMIC_IDS = new Set(['slotDlgName', 'slotDlgLines']);
+const DYNAMIC_IDS = new Set(['slotDlgName', 'slotDlgLines', 'slotDlgVals']);
 for (const id of DYNAMIC_IDS) definedIds.add(id);
 
 console.log(`\n=== HTML 里定义的 id 共 ${definedIds.size} 个（含 ${DYNAMIC_IDS.size} 个动态创建）===`);
@@ -134,6 +134,7 @@ const needFns = ['scanSlots','validateTemplate','warnTemplate','slotValues','com
                  'pickCombo','buildCombo','cfgLoad','cfgSaveNow','cfgSaveDebounced','planSave',
                  'templateHash','loadBatchPane','saveBatchPane','renderSlotEditor','onSlotEdit',
                  'slotIsUsed','renderTplTags','validateBatch','escapeHtml','syncBatchLabels',
+                 'appendSlotToTpl','flashTplTag','tplTagItems','editSlotByName',
                  'renderComboPreview','renderFrozenInfo','renderPlanCard','planAbandon',
                  'batchParams','batchBody','generateBatch','resumeBatch','runBatchLoop',
                  'bootConfig','cloneFactorySlots',

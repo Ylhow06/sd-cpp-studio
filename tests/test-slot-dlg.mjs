@@ -11,6 +11,8 @@
      F. 新增 / 删除
      G. 三种关闭方式：Escape / 点遮罩 / 「完成」
      H. 套用真实模板（裙子女生 11 槽）后仍正确
+     I. 标签行三态：亮（已配置+已用）/ 暗（已配置+未用）/ 红（已用+未配置）
+     J. 点标签：亮/暗 → 追加（重复点重复追加）；红 → 打开编辑器去新增/编辑
 
    用法：node tests/test-slot-dlg.mjs [port]
    需要先起配置服务（脚本自己起也行）：
@@ -334,6 +336,235 @@ console.log('\n=== 12. 警告通道（黄色提醒，不拦生成）===');
   chk(r.o1.warns === 1, `警告恰好 1 条（实际 ${r.o1.warns}）`);
   chk(!r.o2.warnShown && r.o2.warns === 0, '★ 包进条件块后警告消失');
   chk(r.o2.errs === 0, '包块后仍零错误');
+}
+
+console.log('\n=== 13. 标签行三态：亮 / 暗 / 红 ===');
+{
+  /* 构造一个能同时覆盖三态的场景：
+       · 服装：已配置 + 已使用        → 亮
+       · 场景：已配置 + 已使用        → 亮
+       · 道具：已配置 + 未使用        → 暗
+       · 空槽：已配置但数组为空 + 未使用 → 暗？不 —— 未使用且空数组按 miss
+       · 发型：模板用了但完全没配置   → 红 */
+  w.eval(`
+    S.m.batch.template = '一个{{服装}}的{{场景}}，{{发型}}';
+    S.m.batch.slots = [
+      { name: '服装', values: ['皮夹克','马甲'] },
+      { name: '场景', values: ['夜市','沙滩'] },
+      { name: '道具', values: ['雨伞','相机'] },
+      { name: '空槽', values: [] }
+    ];
+    loadBatchPane();
+  `);
+  await new Promise(r => setTimeout(r, 250));
+
+  const states = JSON.parse(w.eval(`
+    JSON.stringify([...$('#tplTags').querySelectorAll('.tg')]
+      .map(el => ({ name: el.dataset.name, state: el.dataset.state, cls: el.className,
+                    text: el.textContent })))
+  `));
+  console.log('    ' + JSON.stringify(states));
+
+  const st = n => states.find(x => x.name === n)?.state;
+
+  chk(states.length === 5, `标签行显示全部 5 个占位符（含未使用/未配置）（实际 ${states.length}）`);
+  chk(st('服装') === 'ok' && st('场景') === 'ok', '★ 已配置+已使用 → 亮（ok）');
+  chk(st('道具') === 'off', '★ 已配置+未使用 → 暗（off）');
+  chk(st('发型') === 'miss', '★ 已使用+未配置 → 红（miss）');
+  /* ★ 边界：未使用 + 空数组 = 暗（草稿），不是红。
+     标红会让「刚点＋新增」的槽位看起来像出错了 —— 它只是还没写完。
+     一旦点它追加进模板（变成已使用），仍为空就会自动转红，路径自洽。 */
+  chk(st('空槽') === 'off', '★ 未使用+空数组 → 暗（草稿，不标红）');
+
+  // 角标文案：红的说「缺数组」，暗的草稿说「0 条」
+  const txtOf = n => states.find(x => x.name === n)?.text || '';
+  chk(txtOf('发型').includes('缺数组'), '红色角标显示「缺数组」');
+  chk(txtOf('空槽').includes('0 条') && !txtOf('空槽').includes('缺数组'),
+      '★ 暗色草稿显示「0 条」而不是「缺数组」（不是错误状态）');
+
+  // 类名要真的落到 DOM 上（CSS 才生效）
+  const clsOf = n => states.find(x => x.name === n)?.cls || '';
+  chk(!/ off| miss/.test(clsOf('服装')), '亮的没有附加状态类');
+  chk(clsOf('道具').includes('off'), '暗的带 off 类');
+  chk(clsOf('发型').includes('miss'), '红的带 miss 类');
+
+  // 顺序：先模板出现顺序，再补未使用的
+  const order = states.map(x => x.name);
+  console.log('    顺序: ' + order.join(' → '));
+  chk(order.indexOf('服装') < order.indexOf('场景')
+      && order.indexOf('场景') < order.indexOf('发型'),
+      '★ 模板里用到的按出现顺序排在前面');
+  chk(order.indexOf('道具') > order.indexOf('发型'), '未使用的排在后面');
+
+  // 红色标签的提示语说明会去编辑，不是追加
+  const missTitle = JSON.parse(w.eval(`
+    JSON.stringify([...$('#tplTags').querySelectorAll('.tg')]
+      .find(el => el.dataset.name === '发型').title)
+  `));
+  console.log('    红色标签 title: ' + JSON.stringify(missTitle).slice(0, 90));
+  chk(/新增|编辑/.test(missTitle), '★ 红色标签提示「点击去新增/编辑」');
+  chk(!/追加到模板末尾/.test(missTitle), '红色标签不提「追加」（避免误导）');
+
+  /* ★ 状态自洽：暗的草稿（未使用 + 空数组）点一下追加进模板后，
+     就变成「已使用 + 空数组」→ 应当自动转红。
+     这条路径保证「暗 → 点 → 红」不会卡在中间态。 */
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='空槽').click()`);
+  await new Promise(r => setTimeout(r, 200));
+  chk(w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='空槽').dataset.state`) === 'miss',
+      '★ 暗草稿追加进模板后自动转红（未使用空数组 → 已使用空数组）');
+  chk(JSON.parse(w.eval(`JSON.stringify(validateBatch().errors.some(e=>e.kind==='emptyarr'))`)) === true,
+      '转红后确实报「数组为空」错误（状态与实际校验一致）');
+  // 复原，别影响后续断言
+  w.eval(`
+    S.m.batch.template = '一个{{服装}}的{{场景}}，{{发型}}';
+    loadBatchPane();
+  `);
+  await new Promise(r => setTimeout(r, 200));
+}
+
+console.log('\n=== 14. 点标签：亮/暗 → 追加，重复点重复追加 ===');
+{
+  w.eval(`
+    S.m.batch.template = '一个{{服装}}的{{场景}}';
+    S.m.batch.slots = [
+      { name: '服装', values: ['皮夹克','马甲'] },
+      { name: '场景', values: ['夜市','沙滩'] },
+      { name: '道具', values: ['雨伞'] }
+    ];
+    loadBatchPane();
+  `);
+  await new Promise(r => setTimeout(r, 250));
+
+  const t0 = w.eval('S.m.batch.template');
+
+  // 点亮标签 → 追加
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='服装').click()`);
+  await new Promise(r => setTimeout(r, 150));
+  chk(w.eval('S.m.batch.template') === t0 + '{{服装}}', '★ 点亮标签 → 追加 {{服装}}');
+
+  // 点暗标签 → 也追加（这是本次新增的能力：把没用到的插进来）
+  const t1 = w.eval('S.m.batch.template');
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='道具').click()`);
+  await new Promise(r => setTimeout(r, 150));
+  chk(w.eval('S.m.batch.template') === t1 + '{{道具}}', '★ 点暗标签 → 追加 {{道具}}（新能力）');
+  chk(w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='道具').dataset.state`) === 'ok',
+      '★ 追加后「道具」由暗转亮（已使用）');
+
+  // 重复点同一个 → 重复追加
+  const t2 = w.eval('S.m.batch.template');
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='服装').click()`);
+  await new Promise(r => setTimeout(r, 120));
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='服装').click()`);
+  await new Promise(r => setTimeout(r, 120));
+  chk(w.eval('S.m.batch.template') === t2 + '{{服装}}{{服装}}', '★ 重复点击重复追加');
+
+  // DOM 同步 + 渲染无残留 + 组合数不受重复影响
+  chk(w.eval('fld("batch","template").value') === w.eval('S.m.batch.template'),
+      'DOM textarea 已同步');
+  const r = JSON.parse(w.eval(`
+    (() => {
+      const tpl = S.m.batch.template;
+      const c = pickCombo(S.m.batch.slots, tpl, null, false);
+      return JSON.stringify({ out: renderPrompt(tpl, c.map),
+                              combo: comboCount(S.m.batch.slots, tpl) });
+    })()
+  `));
+  console.log('    渲染: ' + r.out);
+  chk(!/\{\{/.test(r.out), '★ 渲染无残留占位符');
+  chk(r.combo === 2 * 2 * 1, `组合数不受重复出现影响（${r.combo}，期望 4）`);
+  chk(JSON.parse(w.eval(`JSON.stringify(validateBatch().errors.length)`)) === 0, '追加后仍零错误');
+
+  // 高亮反馈
+  const fl = w.eval(`
+    (() => {
+      appendSlotToTpl('服装');
+      const tg = [...$('#tplTags').querySelectorAll('.tg')].find(el => el.dataset.name === '服装');
+      return tg ? tg.classList.contains('flash') : false;
+    })()
+  `);
+  chk(fl === true, '★ 追加后标签有高亮反馈');
+  chk(w.eval(`(()=>{ appendSlotToTpl(''); return S.m.batch.template; })()`) === w.eval('S.m.batch.template'),
+      '空名字不追加');
+}
+
+console.log('\n=== 15. 点红色标签 → 打开编辑器去新增/编辑 ===');
+{
+  w.eval(`
+    S.m.batch.template = '一个{{服装}}的{{发型}}';
+    S.m.batch.slots = [{ name: '服装', values: ['皮夹克'] }];
+    S.m.batch.template = '一个{{服装}}的{{发型}}';
+    loadBatchPane();
+  `);
+  await new Promise(r => setTimeout(r, 250));
+
+  chk(w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='发型').dataset.state`) === 'miss',
+      '前置：「发型」是红色（模板用了但没配置）');
+  const n0 = JSON.parse(w.eval('S.m.batch.slots.length'));
+  const tplBefore = w.eval('S.m.batch.template');
+
+  // 点红色标签
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='发型').click()`);
+  await new Promise(r => setTimeout(r, 400));
+
+  chk(w.eval(`$('#slotDlg').classList.contains('show')`), '★ 打开了占位符编辑器');
+  chk(JSON.parse(w.eval('S.m.batch.slots.length')) === n0 + 1,
+      `★ 自动新建了同名空槽（${n0} → ${w.eval('S.m.batch.slots.length')}）`);
+  chk(w.eval(`S.m.batch.slots[slotDlgIndex].name`) === '发型',
+      '★ 弹窗定位到「发型」（不用手打名字）');
+  chk(w.eval(`$('#slotDlgName').value`) === '发型', '右侧编辑区显示的是「发型」');
+  chk(w.eval('S.m.batch.template') === tplBefore, '★ 红色标签不会改动模板（不追加）');
+
+  // 填上取值后应变亮
+  w.eval(`
+    (() => {
+      const ta = $('#slotDlgVals');
+      ta.value = '双马尾\\n短发';
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    })()
+  `);
+  await new Promise(r => setTimeout(r, 300));
+  chk(w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='发型').dataset.state`) === 'ok',
+      '★ 填上取值后「发型」由红转亮');
+
+  // 已存在的槽位：点红色标签不应重复新建
+  w.eval(`
+    S.m.batch.slots.push({ name: '眼镜', values: [] });
+    S.m.batch.template = '一个{{服装}}的{{眼镜}}';
+    loadBatchPane();
+  `);
+  await new Promise(r => setTimeout(r, 250));
+  const n1 = JSON.parse(w.eval('S.m.batch.slots.length'));
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='眼镜').click()`);
+  await new Promise(r => setTimeout(r, 300));
+  chk(JSON.parse(w.eval('S.m.batch.slots.length')) === n1,
+      '★ 空数组但已存在的槽位：不重复新建，直接定位过去');
+  chk(w.eval(`S.m.batch.slots[slotDlgIndex].name`) === '眼镜', '定位到「眼镜」');
+
+  // 关掉弹窗，免得影响后面
+  w.eval(`closeSlotDlg()`);
+  await new Promise(r => setTimeout(r, 200));
+}
+
+console.log('\n=== 16. 回归：标签操作不依赖隐藏的 #slotList ===');
+{
+  /* ★ 旧实现（占位符弹窗重构之前）是 scrollIntoView / focus #slotList 里
+     对应的槽位。重构后 #slotList 变成 hidden 的「真相容器」，
+     对隐藏元素这两者都不生效 —— 表现为「点了没反应」。
+     这里断言：追加与跳转都在 #slotList 不可见时正常工作。 */
+  chk($('#slotList').hasAttribute('hidden'), '#slotList 仍是隐藏的（真相容器）');
+
+  w.eval(`
+    S.m.batch.template = '一个{{服装}}';
+    S.m.batch.slots = [{ name: '服装', values: ['A'] }, { name: '场景', values: ['B'] }];
+    loadBatchPane();
+  `);
+  await new Promise(r => setTimeout(r, 250));
+
+  const t = w.eval('S.m.batch.template');
+  w.eval(`[...$('#tplTags').querySelectorAll('.tg')].find(el=>el.dataset.name==='场景').click()`);
+  await new Promise(r => setTimeout(r, 150));
+  chk(w.eval('S.m.batch.template') === t + '{{场景}}',
+      '★ 隐藏容器存在时点暗标签仍追加（旧实现失效点）');
 }
 
 console.log('\n页面异常: ' + (errs.length ? errs.slice(0, 3).join(' | ') : '无'));
