@@ -10,13 +10,22 @@
      H. ★ 安全：跨站拒绝、路径合法性、空字节
      I. saveDir 随配置持久化
 
-   用法：node tests/test-open-dir.mjs [port]
-   需要先启动配置服务：
-     node config-service/serve-config.mjs <port>
-   ══════════════════════════════════════════════════════════════ */
+   用法：node tests/test-open-dir.mjs
+   （自己起隔离服务，无需任何前置步骤）
 
-const PORT = Number(process.argv[2] || 1247);
-const BASE = `http://127.0.0.1:${PORT}`;
+   ★ 本文件自己起一个「临时配置 + 临时模板库 + 内核分配的空闲端口」的服务，
+     所以 I 段那些写配置的操作全落在临时文件里，**绝不碰** app/ui/config.json。
+     之前这里要人工先起服务（端口 1247 写死），并且直接读写真实配置 ——
+     中途崩了就把用户的 saveDir / 批量设置写坏。
+   ══════════════════════════════════════════════════════════════ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { startIsolatedService, ROOT } from './harness.mjs';
+
+/* ★ 隔离服务：配置与模板库都在临时目录，跑完自动清理 */
+const SVC = await startIsolatedService();
+const PORT = SVC.port;
+const BASE = SVC.base;
 
 const ok = [], fail = [];
 const chk = (c, m) => (c ? ok.push(m) : fail.push(m));
@@ -52,8 +61,8 @@ try {
   const h = await api.health();
   if (!h.body || !h.body.ok) throw new Error('health 未返回 ok');
 } catch (e) {
-  console.error(`[ERROR] 连不上配置服务 ${BASE} —— ${e.message}`);
-  console.error('        先在工程根执行：node config-service/serve-config.mjs ' + PORT);
+  console.error(`[ERROR] 隔离配置服务不可用 ${BASE} —— ${e.message}`);
+  SVC.stop();
   process.exit(2);
 }
 
@@ -66,15 +75,11 @@ console.log('=== D. /health ===');
   chk('lastSaveDir' in h.openDir, '暴露 lastSaveDir');
 }
 
-const fs = await import('node:fs');
-const path = await import('node:path');
-const { fileURLToPath } = await import('node:url');
-/* ★ 路径定位：本文件在 <root>\tests\ 下。用 import.meta.url 推导，
-   因此从任何工作目录执行都能找到文件。 */
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.dirname(HERE);
+/* ★ 本文件已自己起隔离服务，ROOT 从 harness 取（不再自己推导）。
+   CFG_SERVICE 指向真实的工程文件，用作「一个真实存在的文件」来测 notdir；
+   UI_CFG 是**隔离的临时配置**，所有写操作都落在它上面，不碰用户真实配置。 */
 const CFG_SERVICE = path.join(ROOT, 'config-service', 'serve-config.mjs');
-const UI_CFG = path.join(ROOT, 'app', 'ui', 'config.json');
+const UI_CFG = SVC.cfgPath;
 
 // 用工程根当「一个真实存在的目录」来测 /savedir 与 /open-dir
 const BASE_DIR = ROOT;
@@ -104,6 +109,14 @@ console.log('\n=== F. /open-dir ===');
   const r1 = await api.openDir(BASE_DIR);
   chk(r1.status === 200 && r1.body.ok, '★ 本目录可打开');
 
+  /* ★ 断言「没有真的弹窗」。
+     测试跑一轮会调 /open-dir 好几次，每次都真 spawn explorer.exe 的话
+     屏幕上会攒下一堆文件夹窗口。所以隔离服务带 SDCFG_NO_OPEN=1：
+     校验全走、只是不弹窗。这里确认那个开关确实生效了 ——
+     否则「不弹窗」只是我们的假设，哪天开关写错名字也没人发现。 */
+  chk(r1.body.dryRun === true, '★ 测试模式下不真的弹资源管理器窗口（dryRun）');
+  chk(r1.body.path === BASE_DIR, 'dryRun 仍回显要打开的路径（结构一致，断言不用分叉）');
+
   const win = 'C:\\Windows';
   if (fs.existsSync(win)) {
     const r2 = await api.openDir(win);
@@ -122,6 +135,12 @@ console.log('\n=== F. /open-dir ===');
 
   const r6 = await api.openDir(CFG_SERVICE);
   chk(r6.status === 400 && r6.body.code === 'notdir', '★ 指向文件 → 400 notdir');
+
+  /* ★ 反向确认：dryRun 只跳过「弹窗」，没跳过校验。
+     上面 missing / notdir / nopath 三条都仍按真实规则拒绝，
+     说明这个开关没有把 /open-dir 变成无条件放行的空操作。 */
+  chk(r5.body.dryRun === undefined && r6.body.dryRun === undefined,
+      '★ 被拒的请求不会带 dryRun（校验发生在弹窗之前，没被开关绕过）');
 }
 
 console.log('\n=== H. 安全边界（v2 重点：反跨站） ===');
@@ -204,12 +223,10 @@ console.log('\n=== G. /list-dir 与 /drives ===');
 
 console.log('\n=== I. saveDir 持久化 ===');
 {
-  // ★ 注意：本组会写真实配置文件，收尾必须还原成「测试前的样子」。
-  //   之前用 GET 拿到的快照做还原，但 GET 返回的是 sanitize 过的对象，
-  //   且若启动时磁盘上就有残留 plan，会被原样写回 —— 等于测试往用户配置里
-  //   塞了个假计划。这里改成先读原始文件，最后按原始内容写回。
-  const fsx = await import('node:fs');
-  const pathx = await import('node:path');
+  /* ★ UI_CFG 现在指向**隔离的临时配置**（SVC.cfgPath），不是用户真实配置。
+     所以这一组怎么写都不会影响用户；收尾仍按原始字节还原，
+     顺带把「写进去能读回来」这个持久化语义本身也验证了。 */
+  const fsx = fs;
   const cfgPath = UI_CFG;
   const originalRaw = fsx.existsSync(cfgPath) ? fsx.readFileSync(cfgPath, 'utf8') : null;
   const before = await api.getCfg();
@@ -335,6 +352,7 @@ if (fail.length) {
   console.log('\n失败 ' + fail.length + ' 项：');
   fail.forEach(f => console.log('  ✗ ' + f));
 }
+SVC.stop();                                   // 关掉隔离服务并清掉临时目录
 console.log('\n' + '─'.repeat(50));
 console.log(fail.length ? `结果：${ok.length} 通过 / ${fail.length} 失败` : `结果：${ok.length} 通过 / 0 失败`);
 process.exit(fail.length ? 1 : 0);

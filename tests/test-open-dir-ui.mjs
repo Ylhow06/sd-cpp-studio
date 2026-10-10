@@ -8,20 +8,9 @@
    Y. 服务不可用 → 弹窗给出提示，不崩
    ══════════════════════════════════════════════════════════════ */
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { UI_HTML, loadJsdom } from './harness.mjs';
 
-/* ★ 路径定位：本文件在 <root>\tests\ 下，UI 在 <root>\app\ui\ 下。
-   用 import.meta.url 推导，因此从任何工作目录执行都能找到文件。 */
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.dirname(HERE);
-const UI_DIR = path.join(ROOT, 'app', 'ui');
-const UI_HTML = path.join(UI_DIR, 'index.html');
-const UI_CFG = path.join(UI_DIR, 'config.json');
-const CFG_SERVICE = path.join(ROOT, 'config-service', 'serve-config.mjs');
-const { JSDOM, VirtualConsole } = await import(
-  'file:///' + process.env.TEMP.replace(/\\/g, '/') + '/sdjsdom/node_modules/jsdom/lib/api.js'
-);
+const { JSDOM, VirtualConsole } = loadJsdom();
 
 const html = fs.readFileSync(UI_HTML, 'utf8');
 const vc = new VirtualConsole();
@@ -203,7 +192,7 @@ console.log('\n=== W. 填写路径 → 登记 → 打开 ===');
 
 console.log('\n=== W2. 预填来源：不采用服务端残留的 lastSaveDir ===');
 {
-  // 服务端 health 会带 lastSaveDir=C:\Users\36069\Pictures（上个会话残留）。
+  // 服务端 health 可能带一个上个会话残留的 lastSaveDir（任意旧路径）。
   // 页面在没自己保存过路径时，输入框必须是空的，不能被这个值污染。
   w.__MODE__ = 'ok';
   setReal('');

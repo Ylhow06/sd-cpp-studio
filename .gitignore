@@ -29,6 +29,9 @@ _*.mjs
 *.bak
 *.tmp
 
+# 测试依赖（npm install 重新获取即可）
+node_modules/
+
 # DSH 沙箱 ACL 诊断产物：工具生成，非项目源码
 .dsh-acl-reports/
 

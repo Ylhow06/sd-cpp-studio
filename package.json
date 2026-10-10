@@ -1,0 +1,19 @@
+{
+  "name": "sd-cpp-studio",
+  "version": "0.2.0",
+  "private": true,
+  "description": "stable-diffusion.cpp 本地生图工作台（单文件 UI + 配置服务 + 测试）",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run-all.mjs",
+    "test:engine": "node tests/test-slot-engine.mjs",
+    "test:dom": "node tests/test-e2e-jsdom.mjs",
+    "serve": "node config-service/serve-config.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.2"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  }
+}

@@ -10,29 +10,55 @@
      E. 改名 / 改概率（含左侧列表与角标实时刷新）
      F. 新增 / 删除
      G. 三种关闭方式：Escape / 点遮罩 / 「完成」
-     H. 套用真实模板（裙子女生 11 槽）后仍正确
+     H. 套用模板（自造的多槽固定装置）后仍正确
      I. 标签行三态：亮（已配置+已用）/ 暗（已配置+未用）/ 红（已用+未配置）
      J. 点标签：亮/暗 → 追加（重复点重复追加）；红 → 打开编辑器去新增/编辑
 
-   用法：node tests/test-slot-dlg.mjs [port]
-   需要先起配置服务（脚本自己起也行）：
-     node config-service/serve-config.mjs 1247
+   用法：node tests/test-slot-dlg.mjs
+   （自己起隔离服务，无需任何前置步骤）
    ══════════════════════════════════════════════════════════════ */
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { UI_HTML, loadJsdom, readUiHtml, startIsolatedService } from './harness.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.dirname(HERE);
-const UI_HTML = path.join(ROOT, 'app', 'ui', 'index.html');
-const PORT = Number(process.argv[2] || 1247);
+const { JSDOM, VirtualConsole } = loadJsdom();
 
-const { JSDOM, VirtualConsole } = await import(
-  'file:///' + process.env.TEMP.replace(/\\/g, '/') + '/sdjsdom/node_modules/jsdom/lib/api.js'
-);
+/* ★ 自己起一个「临时配置 + 临时模板库 + 内核分配的空闲端口」的服务。
+   之前这里要人工先跑 `node config-service/serve-config.mjs 1247`，端口还写死；
+   起不来就整个文件失败。现在跑 `node tests/test-slot-dlg.mjs` 即可，无前置步骤。 */
+const SVC = await startIsolatedService();
 
-const raw = fs.readFileSync(UI_HTML, 'utf8');
-const html = raw.replace(/const CFG_URL\s*=\s*'http:\/\/127\.0\.0\.1:\d+'/, `const CFG_URL = 'http://127.0.0.1:${PORT}'`);
+/* ★ 第 8 节要验「套用真实模板后弹窗仍正确」。这里**自己造**一个多槽模板写进
+   隔离模板库，而不是依赖用户个人模板库里的 tpl_muwcqto6_skirt_full。
+   原来那版在没有该模板时静默跳过整节 —— 覆盖度随机器而变，
+   别人跑出「117 通过」而本机「126 通过」，等于这节白写。 */
+const FIXTURE_TPL = {
+  id: 'tpl_fixture_many_slots',
+  name: '测试用·多槽模板',
+  at: Date.now(),
+  template: '全身竖构图，一位女孩，{{发型}}，{{氛围}}。'
+          + '裙子：{{裙子}}。'
+          + '{{#头饰}}头饰：{{头饰}}；{{/头饰}}{{#首饰}}首饰：{{首饰}}；{{/首饰}}'
+          + '{{#袜子}}袜子：{{袜子}}；{{/袜子}}{{#眼镜}}眼镜：{{眼镜}}；{{/眼镜}}'
+          + '鞋子（必穿）：{{鞋子}}。场景：{{场景}}。动作：{{动作}}。',
+  slots: [
+    { name: '发型', values: ['黑色长发披肩', '黑色长发扎高马尾'] },
+    { name: '氛围', values: ['明亮柔和的自然光', '温暖柔和的光线'] },
+    { name: '裙子', values: ['白色吊带连衣裙', '藏青色背心短裙'] },
+    { name: '头饰', values: ['珍珠小发箍', '白色蕾丝发带'], p: 0.5 },
+    { name: '首饰', values: ['细珍珠项链＋小珍珠耳钉'], p: 0.5 },
+    { name: '袜子', values: ['白色中筒袜', '米色棉质中筒袜', '黑色微透连裤丝袜'], p: 0.75 },
+    { name: '眼镜', values: ['银色细框圆形眼镜', '金色细框圆形眼镜'], p: 0.2 },
+    { name: '鞋子', values: ['白色细带玛丽珍鞋'] },
+    { name: '场景', values: ['大学教室的前排课桌', '地铁末班车车厢'] },
+    { name: '动作', values: ['正面直立站姿，双臂自然垂在身体两侧'] }
+  ],
+  count: 8,
+  skipDup: true
+};
+SVC.writeTemplate(FIXTURE_TPL);
+
+const PORT = SVC.port;
+const html = readUiHtml(PORT);
 
 const vc = new VirtualConsole();
 const errs = [];
@@ -167,23 +193,44 @@ await new Promise(r => setTimeout(r, 200));
 chk(!$('#slotDlg').classList.contains('show'), '「完成」能关');
 
 console.log('\n=== 8. 套用模板后仍正确 ===');
-// 模板库可能为空（隔离配置）—— 有「裙子女生」才测这一段
-const hasSkirt = await w.eval(`(S.b.templates||[]).some(t => t.id === 'tpl_muwcqto6_skirt_full')`);
-if (!hasSkirt){
-  console.log('  （模板库里没有「裙子女生·竖版」，跳过这一段 —— 不影响弹窗本身）');
-} else {
-  await w.eval(`(async()=>{ await restoreTemplate('tpl_muwcqto6_skirt_full'); return 1; })()`);
+/* ★ 用本文件自己写进隔离模板库的 FIXTURE_TPL，不依赖用户个人模板库。
+   槽位数从模板本身读、不写死 —— 本测试要验的是「弹窗能正确处理任意槽位数」，
+   不是「某个模板永远有 N 个槽」。 */
+{
+  const wantN = FIXTURE_TPL.slots.length;
+  const names = FIXTURE_TPL.slots.map(s => s.name);
+  console.log(`    模板「${FIXTURE_TPL.name}」有 ${wantN} 个槽：${names.join(' / ')}`);
+
+  const listed = await w.eval(`(S.b.templates||[]).some(t => t.id === '${FIXTURE_TPL.id}')`);
+  chk(listed, '★ 隔离模板库里的固定装置模板已出现在 S.b.templates（不依赖个人模板库）');
+
+  await w.eval(`(async()=>{ await restoreTemplate('${FIXTURE_TPL.id}'); return 1; })()`);
   await new Promise(r => setTimeout(r, 700));
-  chk(slots().length === 11, `套用后有 11 个槽（实际 ${slots().length}）`);
-  chk($$('#slotList .slot').length === 11, '隐藏容器也渲染 11 个');
+  chk(slots().length === wantN, `套用后有 ${wantN} 个槽（实际 ${slots().length}）`);
+  chk($$('#slotList .slot').length === wantN, `隐藏容器也渲染 ${wantN} 个`);
+  chk(JSON.stringify(slots().map(s => s.name)) === JSON.stringify(names),
+      '槽位顺序与模板一致');
   $('#slotOpen').click();
   await new Promise(r => setTimeout(r, 300));
-  chk($$('#slotDlgNav .it').length === 11, `弹窗左侧 11 项（实际 ${$$('#slotDlgNav .it').length}）`);
+  chk($$('#slotDlgNav .it').length === wantN, `弹窗左侧 ${wantN} 项（实际 ${$$('#slotDlgNav .it').length}）`);
+
   const glass = $$('#slotDlgNav .it').find(it => it.querySelector('.nm').textContent === '眼镜');
   chk(!!glass && glass.querySelector('.pn')?.textContent === '20%', '眼镜显示 20% 角标');
   const shoe = $$('#slotDlgNav .it').find(it => it.querySelector('.nm').textContent === '鞋子');
   chk(!!shoe && !shoe.querySelector('.pn'), '鞋子（必选）无概率角标');
-  chk($$('#slotSummary .tg').length === 11, '面板摘要 11 个标签');
+
+  /* 「袜子」是条件块 + 概率槽的代表：p=0.75，取值池里同时有短袜与丝袜。
+     （这是从真实模板踩坑里提炼的固定装置：两个互斥槽位合并成一个，
+       避免渲染出「袜子：…；丝袜：…；」两个并列标签让模型分不清层级。） */
+  const sock = $$('#slotDlgNav .it').find(it => it.querySelector('.nm').textContent === '袜子');
+  chk(!!sock, '存在「袜子」占位符');
+  chk(sock?.querySelector('.pn')?.textContent === '75%', '袜子显示 75% 角标');
+  const sockVals = FIXTURE_TPL.slots.find(s => s.name === '袜子').values;
+  chk(sockVals.filter(v => v.includes('丝袜')).length > 0, '袜子取值池里含丝袜类取值（合并后的形态）');
+  const blockOcc = FIXTURE_TPL.template.split('{{#袜子}}').length - 1;
+  chk(blockOcc === 1, `模板里袜子条件块只出现 1 次（实际 ${blockOcc} 次，并列即冲突）`);
+
+  chk($$('#slotSummary .tg').length === wantN, `面板摘要 ${wantN} 个标签`);
 }
 
 console.log('\n=== 9. 行号槽在弹窗里必须并排（回归）===');
@@ -569,6 +616,7 @@ console.log('\n=== 16. 回归：标签操作不依赖隐藏的 #slotList ===');
 
 console.log('\n页面异常: ' + (errs.length ? errs.slice(0, 3).join(' | ') : '无'));
 if (errs.length) fail += errs.length;
+SVC.stop();                                   // 关掉隔离服务并清掉临时目录
 console.log('\n' + '─'.repeat(50));
 console.log(fail ? `结果：${pass} 通过 / ${fail} 失败` : `结果：${pass} 通过 / 0 失败`);
 process.exit(fail ? 1 : 0);

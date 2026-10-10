@@ -65,9 +65,13 @@
 ## 3. jsdom 测试如何读页面逻辑（改动别破坏它）
 
 jsdom 测试（`tests/test-e2e-jsdom.mjs`、`test-tpl-lib.mjs`、
-`test-batch-strip.mjs`、`test-open-dir-ui.mjs`、`test-lightbox.mjs`）用
+`test-batch-strip.mjs`、`test-open-dir-ui.mjs`、`test-lightbox.mjs`、
+`test-slot-dlg.mjs`、`test-cli-mode-ui.mjs`）用
 `new JSDOM(html, { runScripts:'dangerously', ... })` 真实加载整个 HTML，
 然后靠 `window.eval(...)` 在页面词法作用域里执行/取值。
+
+它们统一从 `tests/harness.mjs` 取 `loadJsdom()` 与 `UI_HTML`
+（jsdom 走仓库根的 `npm install`，不再从 `%TEMP%\sdjsdom` 加载）。
 
 对应的两条硬规则：
 
@@ -77,6 +81,11 @@ jsdom 测试（`tests/test-e2e-jsdom.mjs`、`test-tpl-lib.mjs`、
    `beforeParse` 里的桩顶替。你新增的初始化代码如果**在没有任何用户交互
    时就触发网络请求 / 访问 DOM 之外的东西**，会让所有 jsdom 套件启动即崩。
    不确定就先跑一遍 `node tests/test-e2e-jsdom.mjs`。
+
+3. **新增测试文件**：放 `tests/` 下、以 `test-` 开头即可被 `npm test` 发现
+   （`harness.mjs` 不以 `test-` 开头，天然不会被当测试跑）。
+   需要配置服务就用 `startIsolatedService()`，需要 jsdom 就用 `loadJsdom()`，
+   别自己拼 `%TEMP%` 路径、别写死端口。
 
 ---
 
@@ -106,40 +115,45 @@ jsdom 测试（`tests/test-e2e-jsdom.mjs`、`test-tpl-lib.mjs`、
 
 ---
 
-## 5. 必须跑的测试
+## 5. 跑测试
+
+**一条命令跑全部**（推荐）：
 
 ```bat
-:: 核心（离线）
-node tests\test-slot-engine.mjs
-node tests\test-lazy-sampler.mjs
-node tests\test-dom-refs.mjs
-node tests\test-e2e-jsdom.mjs
-
-:: jsdom 交互套件（改动涉及对应界面时必跑）
-node tests\test-batch-strip.mjs
-node tests\test-open-dir-ui.mjs
-node tests\test-tpl-lib.mjs
-node tests\test-slot-dlg.mjs
-node tests\test-lightbox.mjs
-node tests\test-contain-geometry.mjs
-
-:: CLI（离线）
-node tests\test-cli-label.mjs
-node tests\test-cli-template.mjs
-
-:: 配置服务接口（需先起服务）
-node config-service\serve-config.mjs 1247
-node tests\test-open-dir.mjs 1247
-
-:: 终端续跑（需要能在系统临时目录建目录）
-node tests\test-cli-resume.mjs
+npm install        :: 首次一次即可，装 jsdom
+npm test           :: 15 个测试文件，约 65 秒
 ```
 
-- 需要 jsdom 的话先装一次：
-  `npm install jsdom --prefix %TEMP%\sdjsdom`
-- **测试绝不碰用户真实配置**：测试用 `SDCFG_PATH` 指向临时文件、随机端口，
-  不会写 `app\ui\config.json`。你不要为了让测试通过而改这个前提，
-  也不要去删/写用户真实的 `app\ui\config.json`。
+每个测试**自带隔离环境**：自己起一个「临时配置 + 临时模板库 + 内核分配的空闲端口」
+的配置服务，跑完自己关。所以：
+
+- **不需要**预先起服务，**不需要**手动传端口
+- 绝不碰 `app\ui\config.json` 与 `app\ui\templates\`
+- 测试模式下服务带 `SDCFG_NO_OPEN=1`：`/open-dir` 校验照走，但**不真的弹资源管理器窗口**
+  （否则跑一轮会攒下一堆文件夹窗口）
+
+单个测试也可以直接跑，无需任何前置步骤：
+
+```bat
+node tests\test-slot-engine.mjs     :: 占位符引擎（纯逻辑，最快）
+node tests\test-e2e-jsdom.mjs       :: DOM 端到端
+node tests\test-slot-dlg.mjs        :: 占位符取值弹窗
+node tests\test-open-dir.mjs        :: 配置服务接口 + 安全边界
+```
+
+> 改 UI 时至少跑 `test-dom-refs.mjs`（静态一致性）+ `test-e2e-jsdom.mjs`（端到端）。
+
+### 测试不许依赖个人数据
+
+**硬约束**：测试不得依赖你本机特有的东西 —— 个人模板库里的某个模板、
+某个固定端口、某个固定盘符路径、`%TEMP%` 里手装的 jsdom。
+
+反面教材（已修）：`test-slot-dlg.mjs` 曾要求模板库里存在
+`tpl_muwcqto6_skirt_full`，没有就**静默跳过整节** —— 于是别人跑出 114 项、
+你本机跑出 123 项，那一节等于白写。现在它自己在隔离模板库里写一个固定装置模板。
+
+需要「一个多槽模板」这类素材时，**自己造**（见 `test-slot-dlg.mjs` 的 `FIXTURE_TPL`），
+不要去读用户模板库。
 
 ---
 

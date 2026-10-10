@@ -57,6 +57,19 @@ const TPL_DIR = process.env.SDTPL_DIR
 const HOST = '127.0.0.1';
 const MAX_BODY = 4 * 1024 * 1024;   // 4 MB，配置里只有文本，够用
 
+/* ── 测试开关：不真的弹资源管理器窗口 ──
+   ★ 用**环境变量**而不是请求字段：请求字段意味着任何能访问这个端口的页面
+     都能让 /open-dir 变成空操作 —— 那是在给自己开后门。
+     环境变量只能在启动服务时给，攻击面为零。
+
+   设了 SDCFG_NO_OPEN=1 时，/open-dir 仍走完全部校验（跨站拒绝、路径合法性、
+   missing / notdir / nopath），只是最后**不 spawn explorer.exe**，
+   而是返回 { ok:true, dryRun:true, path }。
+
+   为什么需要它：测试每调一次 /open-dir 就真的弹出一个资源管理器窗口，
+   跑一轮测试会攒下一堆窗口，很烦人。 */
+const NO_OPEN = process.env.SDCFG_NO_OPEN === '1';
+
 /* ── 命令行 ──
    node serve-config.mjs [port]
    端口也可用 SDCFG_PORT 指定。
@@ -301,10 +314,14 @@ function codeToStatus(code) {
 
 /**
  * 用 explorer.exe 打开一个目录。
- * ★ 关键：explorer.exe 即使成功也常返回非 0 退出码（本机实测 0xC0000142），
+ * ★ 关键：explorer.exe 即使成功也常返回非 0 退出码（实测 0xC0000142），
  *   所以【绝不能】用退出码判断成败。只要进程能 spawn 起来就算成功。
  */
 function openInExplorer(dir) {
+  /* ★ 测试开关：校验已全部走完，这里只跳过「真的弹窗」这一步。
+     返回结构与成功路径一致（都带 ok 与 path），测试断言不用分叉。 */
+  if (NO_OPEN) return Promise.resolve({ ok: true, dryRun: true, path: dir });
+
   return new Promise((resolve) => {
     let settled = false;
     const done = (v) => { if (!settled) { settled = true; resolve(v); } };
@@ -1006,6 +1023,9 @@ async function startup() {
     console.log(`[config] 配置文件          ${CONFIG_PATH}`);
     console.log(`[config] 模板库目录        ${TPL_DIR}`);
     console.log('[open]   「打开文件夹」已启用（任意存在的目录均可打开，跨站请求会被拒绝）');
+    if (NO_OPEN) {
+      console.log('[open]   ⚠ SDCFG_NO_OPEN=1 —— 测试模式：校验照走，但不真的弹资源管理器窗口');
+    }
     if (!fs.existsSync(CONFIG_PATH)) {
       console.log('[config] 配置文件不存在，首次写入时自动创建（当前使用出厂默认）');
     }

@@ -7,15 +7,9 @@
     C. cliRun(new) 下发 job.mode='new'；cliRun(resume) 下发 job.mode='resume'
    ══════════════════════════════════════════════════════════════ */
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { UI_HTML, loadJsdom } from './harness.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.dirname(HERE);
-const UI_HTML = path.join(ROOT, 'app', 'ui', 'index.html');
-const { JSDOM, VirtualConsole } = await import(
-  'file:///' + process.env.TEMP.replace(/\\/g, '/') + '/sdjsdom/node_modules/jsdom/lib/api.js'
-);
+const { JSDOM, VirtualConsole } = loadJsdom();
 
 const html = fs.readFileSync(UI_HTML, 'utf8');
 const vc = new VirtualConsole();

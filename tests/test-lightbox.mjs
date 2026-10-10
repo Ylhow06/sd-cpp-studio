@@ -7,21 +7,9 @@
  *   B) 行为：灯箱能打开、缩放、平移、关闭，且 Esc 不会误取消生成任务
  */
 import fs from 'node:fs';
-import path from 'node:path';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { UI_HTML, loadJsdom } from './harness.mjs';
 
-/* ★ 路径定位：本文件在 <root>\tests\ 下，UI 在 <root>\app\ui\ 下。
-   用 import.meta.url 推导，因此从任何工作目录执行都能找到文件。 */
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.dirname(HERE);
-const UI_DIR = path.join(ROOT, 'app', 'ui');
-const UI_HTML = path.join(UI_DIR, 'index.html');
-const UI_CFG = path.join(UI_DIR, 'config.json');
-const CFG_SERVICE = path.join(ROOT, 'config-service', 'serve-config.mjs');
-
-const require = createRequire(import.meta.url);
-const { JSDOM, VirtualConsole } = require(process.env.TEMP + '/sdjsdom/node_modules/jsdom');
+const { JSDOM, VirtualConsole } = loadJsdom();
 
 let pass = 0, fail = 0;
 const bad = [];

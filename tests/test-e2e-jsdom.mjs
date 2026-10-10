@@ -12,27 +12,18 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
+import { UI_HTML, loadJsdom, freePort, waitForService, ROOT as _ROOT } from './harness.mjs';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+import path from 'node:path';
+import os from 'node:os';
 
-/* ★ 路径定位：本文件在 <root>\tests\ 下，UI 在 <root>\app\ui\ 下。
-   用 import.meta.url 推导，因此从任何工作目录执行都能找到文件。 */
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.dirname(HERE);
-const UI_DIR = path.join(ROOT, 'app', 'ui');
-const UI_HTML = path.join(UI_DIR, 'index.html');
-const UI_CFG = path.join(UI_DIR, 'config.json');
-const CFG_SERVICE = path.join(ROOT, 'config-service', 'serve-config.mjs');
+const { JSDOM, VirtualConsole } = loadJsdom();
+const CFG_SERVICE = path.join(_ROOT, 'config-service', 'serve-config.mjs');
 
-const require = createRequire(import.meta.url);
-const { JSDOM, VirtualConsole } = require(process.env.TEMP + '/sdjsdom/node_modules/jsdom');
-
-/* ★ 不用固定 1235 —— 用户可能正开着自己的 serve-config.mjs 占着它。
-   抢不到端口就会出现「测试的服务起不来，页面连到用户的旧服务」，
-   于是读不到自己写的临时配置。这里随机挑一个高位端口。 */
-const CFG_PORT = 21000 + Math.floor(Math.random() * 2000);
+/* ★ 端口由内核分配空闲端口，不再「随机猜一个高位端口」——
+   猜的那种仍可能撞上用户正在跑的服务，撞上就会出现
+   「测试的服务起不来，页面连到用户的旧服务」，于是读不到自己写的临时配置。 */
+const CFG_PORT = await freePort();
 
 const log = (...a) => console.log(...a);
 let pass = 0, fail = 0;
@@ -41,13 +32,35 @@ function ok(n){ pass++; log('  ✓ ' + n); }
 function bad(n, d){ fail++; problems.push(n + (d ? ': ' + d : '')); log('  ✗ ' + n + (d ? '  → ' + d : '')); }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/* ★ 用独立的临时配置文件跑测试，绝不碰用户真实的 ui/config.json。
+/* ★ 用独立的临时配置文件 + 临时模板目录跑测试，绝不碰用户真实的 ui/config.json。
    之前这里直接删 ui/config.json，会把用户的 saveDir / 批量设置全部清掉。 */
-const TEST_CFG = path.join(process.env.TEMP || '/tmp', `sdstudio-test-cfg-${process.pid}.json`);
+const TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sdstudio-e2e-'));
+const TEST_CFG = path.join(TEST_DIR, 'config.json');
+const TEST_TPL_DIR = path.join(TEST_DIR, 'templates');
+fs.mkdirSync(TEST_TPL_DIR, { recursive: true });
+fs.writeFileSync(TEST_CFG, JSON.stringify({
+  version: 1, batch: { template: '', slots: [], count: 8, skipDup: true }, saveDir: ''
+}, null, 2), 'utf8');
+
 const cfgProc = spawn(process.execPath, [CFG_SERVICE, String(CFG_PORT)], {
   stdio: 'ignore',
-  env: { ...process.env, SDCFG_PATH: TEST_CFG }
+  env: {
+    ...process.env,
+    SDCFG_PATH: TEST_CFG,
+    SDTPL_DIR: TEST_TPL_DIR,
+    // ★ 别真的弹资源管理器窗口（见 harness.mjs 里的说明）
+    SDCFG_NO_OPEN: '1',
+    TEMP: TEST_DIR,
+    TMP: TEST_DIR
+  }
 });
+
+// 等服务真的起来再往下走（原来靠固定 sleep，机器慢时会 flaky）
+if (!await waitForService(CFG_PORT)){
+  console.error(`[ERROR] 隔离配置服务未能在端口 ${CFG_PORT} 起来`);
+  try { cfgProc.kill('SIGKILL'); } catch {}
+  process.exit(1);
+}
 
 let page = null;
 
@@ -353,8 +366,24 @@ async function main(){
 
   log('\n=== F. 组合预览与随机性 ===');
   {
+    /* ★ 组合空间必须够大，否则「重新随机后预览会变」会偶发假失败。
+       原来直接复用 E 段的 2×2 = 4 组合空间：skipDup 下重抽必然还是那 4 个，
+       只是顺序随机 —— 新顺序恰好与上次相同的概率是 1/4! ≈ 4.2%，
+       也就是平均每 24 次跑就红一次（实测遇到过「预览没变化（随机性异常）」）。
+       这里把池子扩到 6×6 = 36 组合，重抽得到完全相同序列的概率约 1/140 万，可忽略。
+       顺带让本段自己设置前置状态，不再隐式依赖 E 段的遗留值。 */
     const r = await ev(`
       const d = document;
+      const setSlot = (name, vals) => {
+        const slot = [...d.querySelectorAll('#slotList .slot')].find(x => S.m.batch.slots[+x.dataset.i].name === name);
+        const nv = slot.querySelector('[data-slotvals]');
+        nv.value = vals; nv.dispatchEvent(new Event('input',{bubbles:true}));
+      };
+      setSlot('服装','A1\\nA2\\nA3\\nA4\\nA5\\nA6');
+      setSlot('场景','B1\\nB2\\nB3\\nB4\\nB5\\nB6');
+      await new Promise(r=>setTimeout(r,100));
+      const sd = d.querySelector('[data-pane="batch"] [data-f="skipDup"]');
+      sd.checked = true; sd.dispatchEvent(new Event('change',{bubbles:true}));
       const cn = d.querySelector('[data-pane="batch"] [data-f="count"]');
       cn.value = '4'; cn.dispatchEvent(new Event('input',{bubbles:true}));
       await new Promise(r=>setTimeout(r,100));
@@ -991,9 +1020,8 @@ let code = 1;
 try { code = await main(); }
 catch (e){ console.error('\n测试异常：', e.stack || e.message); code = 1; }
 finally {
-  try { cfgProc.kill(); } catch(_){}
-  try { fs.unlinkSync(TEST_CFG); } catch(_){}
-  try { fs.unlinkSync(TEST_CFG + '.tmp'); } catch(_){}
+  try { cfgProc.kill('SIGKILL'); } catch(_){}
+  try { fs.rmSync(TEST_DIR, { recursive: true, force: true }); } catch(_){}
   await sleep(300);
 }
 process.exit(code);
