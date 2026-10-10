@@ -119,12 +119,20 @@ node tests\test-e2e-jsdom.mjs
 node tests\test-batch-strip.mjs
 node tests\test-open-dir-ui.mjs
 node tests\test-tpl-lib.mjs
+node tests\test-slot-dlg.mjs
 node tests\test-lightbox.mjs
 node tests\test-contain-geometry.mjs
+
+:: CLI（离线）
+node tests\test-cli-label.mjs
+node tests\test-cli-template.mjs
 
 :: 配置服务接口（需先起服务）
 node config-service\serve-config.mjs 1247
 node tests\test-open-dir.mjs 1247
+
+:: 终端续跑（需要能在系统临时目录建目录）
+node tests\test-cli-resume.mjs
 ```
 
 - 需要 jsdom 的话先装一次：
