@@ -133,8 +133,11 @@ console.log('\n=== 5. 不变量：标签 ≠ 提示词 ===');
   const long = '黑色长发披肩，中分，自然垂落';
   ok('长值标签明显短于原值', labelOf(long).length < long.length, labelOf(long).length + ' < ' + long.length);
   ok('标签是原值的前缀（+省略号）', long.startsWith(labelOf(long).replace('…', '')), labelOf(long));
-  // 脚本里必须仍把 renderPrompt 的结果作为 prompt 发送
-  ok('脚本仍用 p.text 作为 prompt', /prompt:\s*p\.text/.test(src));
+  // 脚本里必须仍把 renderPrompt 的结果作为 prompt 发送。
+  // ★ 现在 prompt 是「renderPrompt 结果 + 补充约束」拼接（Z-Image Turbo 不用反向提示词），
+  //   所以断言改为：必须以 p.text 为基底，且把 o.neg 拼在末尾。
+  ok('脚本以 p.text 为 prompt 基底', /prompt:\s*o\.neg\s*\?\s*`\$\{p\.text\}/.test(src));
+  ok('补充约束拼在提示词末尾', /negative_prompt:\s*''/.test(src));
   ok('脚本仍保留 renderPrompt', /function renderPrompt/.test(src));
   ok('脚本不再残留旧截断函数', !/function clipWTail|function iterSkip|function labelPlan/.test(src));
 }

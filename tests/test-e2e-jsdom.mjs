@@ -616,6 +616,9 @@ async function main(){
       S.m.txt2img.w = 512; S.m.txt2img.h = 512; S.m.txt2img.steps = 12;
       const p1 = batchParams();
       const body = batchBody('测试提示词', 999);
+      /* 有约束时的拼接验证：临时塞一条约束进冻结快照 */
+      S.b.frozen = { width:512, height:512, steps:12, cfg:1, sampler:'euler', scheduler:'discrete', seed:1, negative:'无文字' };
+      const bodyWithNeg = batchBody('测试提示词', 999);
       S.b.frozen = { width:512, height:512, steps:12, cfg:1, sampler:'euler', scheduler:'discrete', seed:1, negative:'' };
       S.m.txt2img.w = 1024;
       const p2 = batchParams();
@@ -624,14 +627,23 @@ async function main(){
       return {
         p1, p2,
         bodyPrompt: body.prompt, bodyW: body.width, bodySteps: body.sample_params.sample_steps,
-        bodyBatch: body.batch_count, bodyGuidance: JSON.stringify(body.sample_params.guidance)
+        bodyBatch: body.batch_count, bodyGuidance: JSON.stringify(body.sample_params.guidance),
+        bodyNeg: body.negative_prompt, bodyWithNeg: bodyWithNeg.prompt,
+        defaultNeg: DEFAULT_NEG
       };`);
     log('  p1=' + JSON.stringify(r.p1));
     log('  p2=' + JSON.stringify(r.p2));
     r.p1.w === 512 && r.p1.h === 512 && r.p1.steps === 12
       ? ok('批量继承文生图的尺寸与步数') : bad('参数未继承', JSON.stringify(r.p1));
-    r.bodyPrompt === '测试提示词' && r.bodyW === 512 && r.bodySteps === 12
-      ? ok('batchBody 正确构造请求体') : bad('请求体不对');
+    /* ★ 语义已变：Z-Image Turbo 不用 negative_prompt（guidance_scale = 0），
+       约束改为【正面语句拼到 prompt 末尾】。所以这里断言：
+         · prompt 以渲染结果为基底（并带上了默认约束）
+         · negative_prompt 为空
+       并单独验证有约束时确实被拼接。 */
+    r.bodyPrompt === '测试提示词，' + r.defaultNeg
+      ? ok('batchBody 正确构造请求体（渲染结果 + 默认约束）') : bad('请求体不对', JSON.stringify(r.bodyPrompt));
+    r.bodyNeg === '' ? ok('★ negative_prompt 置空（Turbo 不读它）') : bad('negative_prompt 应为空', r.bodyNeg);
+    r.bodyWithNeg === '测试提示词，无文字' ? ok('★ 补充约束拼在 prompt 末尾') : bad('约束未拼接', r.bodyWithNeg);
     r.bodyBatch === 1 ? ok('每张只出 1 张（串行）') : bad('batch_count 不对');
     r.p2.w === 512 ? ok('冻结快照生效（改文生图不影响本批）') : bad('冻结失效', r.p2.w);
   }

@@ -52,7 +52,7 @@ const USAGE = `
   --cfg F          CFG（默认 1.0）
   --sampler S      采样器（默认 euler）
   --scheduler S    调度器（默认 discrete）
-  --neg "..."      负向提示词（默认与 UI 的 DEFAULT_NEG 一致）
+  --neg "..."      补充约束，会【追加到提示词末尾】（默认与 UI 的 DEFAULT_NEG 一致）
   --seed N         基准 seed（默认随机；第 i 张用 seed + i）
   --out-dir DIR    覆盖保存目录（默认取 config.json 的 saveDir）
   --server URL     生图服务地址（默认 http://127.0.0.1:1234）
@@ -71,7 +71,7 @@ function parseArgs(argv){
   const o = {
     count: null, w: 512, h: 768, steps: 12, cfg: 1.0,
     sampler: 'euler', scheduler: 'discrete',
-    neg: 'lowres, bad anatomy, bad hands, extra limbs, missing fingers, deformed, watermark, text, ugly, disfigured, mismatched pupils, broken halo',
+    neg: '正确的解剖结构，双手五指自然，清晰对焦，无文字，无水印，无logo',
     seed: null, outDir: null, server: 'http://127.0.0.1:1234',
     config: path.join(ROOT, 'app', 'ui', 'config.json'),
     template: null,          // --template：模板库里的 id 或名字
@@ -825,7 +825,7 @@ async function main(){
   console.log('  基准 seed: ' + st.seedBase);
   console.log('  保存目录 : ' + outDir);
   console.log('  出图参数 : ' + `${st.params.w}×${st.params.h} · ${st.params.steps} 步 · CFG ${st.params.cfg} · ${st.params.sampler}/${st.params.scheduler}`);
-  console.log('  反向提示 : ' + (o.neg ? o.neg.slice(0, 60) + (o.neg.length > 60 ? ' …' : '') : '（空）'));
+  console.log('  补充约束 : ' + (o.neg ? o.neg.slice(0, 60) + (o.neg.length > 60 ? ' …' : '') : '（空）'));
   console.log('  服务地址 : ' + o.server);
   if (o.job) console.log('  任务来源 : ' + o.job + '（UI 下发）');
   console.log('');
@@ -876,8 +876,8 @@ async function main(){
     const t0 = Date.now();
 
     const body = {
-      prompt: p.text,
-      negative_prompt: o.neg,
+      prompt: o.neg ? `${p.text}，${o.neg}` : p.text,
+      negative_prompt: '',        // ★ Turbo 不用负面提示词，约束已拼进 prompt
       seed: p.seed,
       batch_count: 1,
       width: st.params.w,

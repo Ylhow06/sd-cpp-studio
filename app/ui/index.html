@@ -724,8 +724,11 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <label>描述你想要的画面</label>
           <textarea data-f="prompt" placeholder="例：夕阳下的海边灯塔，岩石海岸，海浪拍岸，电影感光影，超高细节"></textarea>
           <div class="chips" data-chips="txt2img" style="margin-top:9px"></div>
-          <label>排除内容（反向提示词） <a href="#" data-act="resetneg" style="float:right;font-size:11px;color:var(--dim)">恢复默认</a></label>
-          <textarea data-f="neg" style="min-height:48px" placeholder="例：模糊，低质量，多余手指，水印，文字" data-default-neg></textarea>
+          <label>补充约束（追加到提示词末尾） <a href="#" data-act="resetneg" style="float:right;font-size:11px;color:var(--dim)">恢复默认</a></label>
+          <textarea data-f="neg" style="min-height:48px" placeholder="例：正确的解剖结构，双手五指自然，无文字，无水印" data-default-neg></textarea>
+          <div class="hint">
+            Z-Image Turbo 不使用反向提示词，这里填的内容会以<b>正面语句追加到提示词末尾</b>。
+          </div>
           <div class="chips" data-negchips="txt2img" style="margin-top:9px"></div>
         </div>
 
@@ -830,8 +833,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <label>想把画面改成什么</label>
           <textarea data-f="prompt" placeholder="例：同一场景，改成暴雨夜晚，闪电，湿漉漉的地面反光"></textarea>
           <div class="chips" data-chips="img2img" style="margin-top:9px"></div>
-          <label>排除内容</label>
-          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，低质量" data-default-neg></textarea>
+          <label>补充约束</label>
+          <textarea data-f="neg" style="min-height:44px" placeholder="例：正确的解剖结构，无文字，无水印" data-default-neg></textarea>
           <div class="chips" data-negchips="img2img" style="margin-top:9px"></div>
           <div class="hint">
             Z-Image 在 CFG 1.0 时很"护图"。想大幅改变内容，把下面的 CFG 提到 3–5。
@@ -895,8 +898,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
           <label>涂抹区域要变成什么</label>
           <textarea data-f="prompt" placeholder="例：夜晚的星空，银河，流星，深蓝色天幕，繁星点点"></textarea>
           <div class="chips" data-chips="inpaint" style="margin-top:9px"></div>
-          <label>排除内容</label>
-          <textarea data-f="neg" style="min-height:44px" placeholder="例：模糊，接缝，不自然" data-default-neg></textarea>
+          <label>补充约束</label>
+          <textarea data-f="neg" style="min-height:44px" placeholder="例：接缝自然，边缘过渡平滑" data-default-neg></textarea>
           <div class="chips" data-negchips="inpaint" style="margin-top:9px"></div>
         </div>
 
@@ -1260,11 +1263,18 @@ const $$ = s => [...document.querySelectorAll(s)];
 const $$m = (sel, m) => $$(`[data-pane="${m}"] ${sel}`);
 const fld = (m, f) => document.querySelector(`[data-pane="${m}"] [data-f="${f}"]`);
 
-/* ── 默认负面提示词 ──
-   质量词/发图平台的惯用禁词，绝大多数模型都按英文 CLIP 系文本编码器训练，
-   故保留英文原文；非英语模型（如中文微调底模）可自行在 UI 里改成中文。
+/* ── 默认补充约束（追加到提示词末尾）──
+   ★ 为什么不是「反向提示词」：
+     Z-Image Turbo 官方管线 guidance_scale = 0，且官方明确说明
+     「does not use negative prompts at all」—— 它【完全不读负面提示词】。
+     所以过去这里填的 lowres / bad anatomy 之类对出图毫无作用，
+     写了也是白写（用户实测确认）。
+   ★ 改成【正面约束】：Turbo 指令跟随很强，认「无文字、无水印」这类
+     否定式正面写法；把约束放在提示词【末尾】效果最好（社区共识）。
+   ★ 字段名仍叫 neg（内部名），因为批次快照与续跑状态文件里有这个键，
+     改名会让旧批次无法续跑。语义变了，键名没变。
    注意：必须声明在 S 之前 —— S 的字面量初始化时就要读它，放后面会 TDZ 报错。 */
-const DEFAULT_NEG = 'lowres, bad anatomy, bad hands, extra limbs, missing fingers, deformed, watermark, text, ugly, disfigured, mismatched pupils, broken halo';
+const DEFAULT_NEG = '正确的解剖结构，双手五指自然，清晰对焦，无文字，无水印，无logo';
 
 /* ── 每个模式独立的状态（这是本次重构的核心） ── */
 const S = {
@@ -2066,11 +2076,14 @@ function markRatio(){
   });
 }
 
+/* 补充约束的快捷片段。
+ * ★ 全部写成【正面语句】—— Turbo 不读负面提示词，这些会追加到提示词末尾。
+ *   用「无X」这种否定式正面写法，Turbo 的指令跟随足以理解。 */
 const NEG_CHIPS = [
-  ['质量',     'lowres, blurry, jpeg artifacts, worst quality, low quality'],
-  ['人体',     'bad anatomy, bad hands, extra limbs, missing fingers, extra fingers, deformed'],
-  ['水印文字', 'watermark, text, signature, username, logo, copyright'],
-  ['脸部',     'mismatched pupils, disfigured, asymmetrical face, extra ears'],
+  ['画质',     '清晰对焦，细节丰富，无模糊，无噪点，无jpeg压缩痕迹'],
+  ['人体',     '正确的解剖结构，双手五指自然，四肢数量正确，无多余肢体'],
+  ['无文字',   '无文字，无水印，无签名，无logo'],
+  ['脸部',     '双眼对称，五官自然，面部清晰，无变形'],
 ];
 
 /* ══════════════ 初始化 UI ══════════════ */
@@ -2126,13 +2139,16 @@ function buildNegChips(){
       c.title = frag;
       c.onclick = () => {
         const ta = fld(m, 'neg');
-        const cur = (ta.value || '').split(',').map(t => t.trim()).filter(Boolean);
+        /* ★ 中英文逗号都当分隔符；拼接统一用中文逗号 ——
+           约束片段是中文短语，且最终会以「，」追加到提示词末尾。 */
+        const SEP = /[,，]/;
+        const cur = (ta.value || '').split(SEP).map(t => t.trim()).filter(Boolean);
         const low = cur.map(t => t.toLowerCase());
-        frag.split(',').forEach(t => {
+        frag.split(SEP).forEach(t => {
           const v = t.trim();
           if (v && !low.includes(v.toLowerCase())){ cur.push(v); low.push(v.toLowerCase()); }
         });
-        const next = cur.join(', ');
+        const next = cur.join('，');
         ta.value = next;
         S.m[m].neg = next;
         c.classList.add('on');
@@ -2992,6 +3008,17 @@ async function saveBatchToDir(items, meta){
   return ok;
 }
 
+/* 把「补充约束」拼到提示词末尾。
+ * ★ Z-Image Turbo 不用 negative_prompt（guidance_scale = 0），
+ *   所以约束必须以【正面语句】追加到 prompt 尾部才生效。
+ *   社区共识：约束句放末尾效果最好（先立场景，再收口）。
+ * 仍然发送 negative_prompt 字段（值置空），保持与 sd.cpp 接口兼容。 */
+function withConstraints(prompt, neg){
+  const p = String(prompt || '').trim();
+  const c = String(neg || '').trim();
+  return c ? `${p}，${c}` : p;
+}
+
 /* ══════════════ 生成 ══════════════ */
 function buildBody(){
   savePane(S.mode);
@@ -3003,8 +3030,8 @@ function buildBody(){
   if (isNaN(seed) || seed < 0) seed = Math.floor(Math.random()*2147483647);
 
   const body = {
-    prompt,
-    negative_prompt: (s.neg || '').trim(),
+    prompt: withConstraints(prompt, s.neg),
+    negative_prompt: '',
     seed,
     batch_count: m === 'txt2img' ? (s.batch || 1) : 1,
     sample_params: {
@@ -5143,8 +5170,8 @@ function batchParams(){
 function batchBody(prompt, seed){
   const p = batchParams();
   return {
-    prompt,
-    negative_prompt: p.neg,
+    prompt: withConstraints(prompt, p.neg),
+    negative_prompt: '',        // ★ Turbo 不用负面提示词，约束已拼进 prompt
     seed,
     batch_count: 1,
     width: p.w,
