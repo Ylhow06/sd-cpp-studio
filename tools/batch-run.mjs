@@ -57,6 +57,8 @@ const USAGE = `
   --out-dir DIR    覆盖保存目录（默认取 config.json 的 saveDir）
   --server URL     生图服务地址（默认 http://127.0.0.1:1234）
   --config PATH    指定配置文件（默认 app\\ui\\config.json）
+  --template X     用模板库里的模板（X 是 id 或名字；见 --list-templates）
+  --list-templates 列出模板库里的模板，然后退出
   --job PATH       由 UI 下发的完整任务 JSON（含尺寸/步数/CFG/反向提示词）
   --resume         续跑上次未完成批次（默认总是开新批，检测到未完成时会提示）
   --list           只打印计划，不出图
@@ -72,9 +74,16 @@ function parseArgs(argv){
     neg: 'lowres, bad anatomy, bad hands, extra limbs, missing fingers, deformed, watermark, text, ugly, disfigured, mismatched pupils, broken halo',
     seed: null, outDir: null, server: 'http://127.0.0.1:1234',
     config: path.join(ROOT, 'app', 'ui', 'config.json'),
+    template: null,          // --template：模板库里的 id 或名字
+    listTemplates: false,    // --list-templates：只列模板库
+    tplDir: null,            // 模板库目录（默认与 config 同级的 templates/）
     job: null,
     // --job 快照（由 applyJob 填；默认 null 表示「不来自 UI」，不要留 undefined）
     _jobTpl: null, _jobSlots: null, _jobSkipDup: true,
+    /* 模板来源：null=用 config.json 的 batch；'job'=UI 下发；'template'=--template。
+       ★ 不能靠「_jobTpl 是不是字符串」来判断来源 —— --template 也会填 _jobTpl，
+         但它仍需要从 config.json 读 saveDir。 */
+    _src: null,
     resume: false, forceNew: false, list: false, verify: true,
     // 记录哪些参数是命令行显式给的 —— 显式给的优先于 --job 里的值
     explicit: new Set()
@@ -99,6 +108,9 @@ function parseArgs(argv){
       case '--out-dir':   o.outDir = next(); o.explicit.add('outDir'); break;
       case '--server':    o.server = next().replace(/\/+$/, ''); o.explicit.add('server'); break;
       case '--config':    o.config = next(); o.explicit.add('config'); break;
+      case '--template':  o.template = next(); o.explicit.add('template'); break;
+      case '--tpl-dir':   o.tplDir = next(); o.explicit.add('tplDir'); break;
+      case '--list-templates': o.listTemplates = true; break;
       case '--job':       o.job = next(); break;
       case '--list':      o.list = true; break;
       case '--resume':    o.resume = true; o.explicit.add('resume'); break;
@@ -133,6 +145,7 @@ function applyJob(o){
   o._jobTpl = typeof job.template === 'string' ? job.template : null;
   o._jobSlots = Array.isArray(job.slots) ? job.slots : null;
   o._jobSkipDup = job.skipDup !== false;
+  o._src = 'job';
 
   const p = job.params || {};
   if (!o.explicit.has('w')         && Number.isFinite(+p.w))         o.w = Math.max(1, Math.floor(+p.w));
@@ -147,6 +160,78 @@ function applyJob(o){
   if (!o.explicit.has('outDir')    && typeof job.outDir === 'string' && job.outDir.trim()) o.outDir = job.outDir.trim();
   if (!o.explicit.has('server')    && typeof job.server === 'string' && job.server.trim()) o.server = job.server.trim().replace(/\/+$/, '');
   if (!o.explicit.has('resume')    && job.mode === 'resume') o.resume = true;
+}
+
+/* ────────────────── 模板库（一个模板一个文件） ──────────────────
+ *  与 UI 同源：模板存在 <config 同级>/templates/<id>.json。
+ *  CLI 侧只读，不写（写入交给 UI / 配置服务）。
+ *  id 是文件名的一部分，因此必须严格校验，防路径注入。 */
+
+const TPL_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** 模板库目录：默认与配置文件同级。可用 --tpl-dir 覆盖。 */
+function tplDirOf(o){
+  return o.tplDir || path.join(path.dirname(o.config), 'templates');
+}
+
+/** 读取模板库全部模板（读不到的跳过，不致命）。 */
+function loadTemplates(o){
+  const dir = tplDirOf(o);
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (e){
+    if (e.code === 'ENOENT') return { dir, list: [] };
+    fail(`读不到模板库目录 ${dir}：${e.message}`);
+  }
+  const list = [];
+  for (const n of names){
+    if (!n.endsWith('.json')) continue;
+    const id = n.slice(0, -'.json'.length);
+    if (!TPL_ID_RE.test(id)) continue;
+    try {
+      const t = JSON.parse(fs.readFileSync(path.join(dir, n), 'utf8'));
+      if (t && typeof t === 'object' && typeof t.template === 'string'){
+        if (typeof t.id !== 'string' || !t.id) t.id = id;
+        list.push(t);
+      }
+    } catch { /* 单个坏文件跳过 */ }
+  }
+  list.sort((a, b) => (b.at || 0) - (a.at || 0));
+  return { dir, list };
+}
+
+/** 按 id 或名字找模板。名字支持唯一前缀匹配（省得敲全名）。 */
+function findTemplate(list, key){
+  const k = String(key || '').trim();
+  if (!k) return { t: null, why: '空' };
+  const byId = list.find(t => t.id === k);
+  if (byId) return { t: byId };
+  const exact = list.filter(t => t.name === k);
+  if (exact.length === 1) return { t: exact[0] };
+  if (exact.length > 1) return { t: null, why: '重名', matches: exact };
+  const pre = list.filter(t => t.name.startsWith(k) || t.id.startsWith(k));
+  if (pre.length === 1) return { t: pre[0] };
+  if (pre.length > 1) return { t: null, why: '前缀不唯一', matches: pre };
+  return { t: null, why: '没找到' };
+}
+
+function printTemplateList(dir, list){
+  console.log('');
+  console.log('  模板库：' + dir);
+  if (!list.length){
+    console.log('  （空 —— 先在 UI 里点「💾 另存为模板」存一个）');
+    console.log('');
+    return;
+  }
+  const pad = Math.max(...list.map(t => t.id.length));
+  for (const t of list){
+    const n = Array.isArray(t.slots) ? t.slots.length : 0;
+    console.log(`  ${t.id.padEnd(pad)}  ${t.name}  ·  ${n} 组 · ${t.count || 1} 张`);
+  }
+  console.log('');
+  console.log('  用法：node tools\\batch-run.mjs --template <id 或名字>');
+  console.log('');
 }
 
 /* ────────────────── 模板 / 组合（与 index.html 同源） ────────────────── */
@@ -528,12 +613,53 @@ function tsStamp(){
 
 async function main(){
   const o = parseArgs(process.argv.slice(2));
+
+  /* --list-templates：只列模板库就退出（不需要保存目录/服务） */
+  if (o.listTemplates){
+    const { dir, list } = loadTemplates(o);
+    printTemplateList(dir, list);
+    return;
+  }
+
+  // ★ 互斥检查必须在 applyJob 之前：否则会先去读那个不存在的 job 文件，
+  //   报出「读不到任务文件」这种答非所问的错误。
+  if (o.template && o.job){
+    fail('--template 与 --job 不能同时用：两者都在指定模板来源。');
+  }
+
   applyJob(o);                       // ★ --job 先落进 o，后面统一处理
 
+  /* --template：把模板库里的那个模板当作「当前模板」。 */
+  if (o.template){
+    const { dir, list } = loadTemplates(o);
+    const hit = findTemplate(list, o.template);
+    if (!hit.t){
+      if (hit.matches && hit.matches.length){
+        console.error(`\n[错误] 「${o.template}」${hit.why}，有多个候选：\n`);
+        for (const t of hit.matches) console.error(`  ${t.id}  ${t.name}`);
+        console.error('\n请用完整的 id 指定。\n');
+        process.exit(2);
+      }
+      console.error(`\n[错误] 模板库里找不到「${o.template}」（${hit.why}）。`);
+      console.error(`        模板库目录：${dir}`);
+      console.error('        用 --list-templates 看看有哪些。\n');
+      process.exit(2);
+    }
+    const t = hit.t;
+    o._jobTpl = t.template;
+    o._jobSlots = Array.isArray(t.slots) ? t.slots : [];
+    o._src = 'template';
+    // 模板自带的张数/去重：命令行没显式给就用模板的
+    if (!o.explicit.has('count') && Number.isFinite(+t.count)) o.count = Math.max(1, Math.floor(+t.count));
+    if (!o.explicit.has('skipDup')) o._jobSkipDup = t.skipDup !== false;
+    console.log(`[模板] 使用「${t.name}」（${t.id}）· ${o._jobSlots.length} 组数组`);
+  }
+
   /* 0) 保存目录（续跑要先知道目录才能定位状态文件）
-        优先 o.outDir；否则读 config.json 的 saveDir。 */
+        优先 o.outDir；否则读 config.json 的 saveDir。
+        ★ 只有 UI 下发的 --job 自带 outDir 语义；--template 仍应从 config 读。 */
   let outDir = o.outDir || '';
-  if (!outDir && typeof o._jobTpl !== 'string'){
+  if (!outDir && o._src !== 'job'){
     try {
       const cfg = JSON.parse(fs.readFileSync(o.config, 'utf8'));
       if (typeof cfg.saveDir === 'string') outDir = cfg.saveDir;
@@ -569,7 +695,7 @@ async function main(){
     if (typeof prev.neg === 'string') o.neg = prev.neg;   // 反向提示词也取自快照
     console.log(`[续跑] 沿用批次 ${prev.stamp}，已完成 ${st.done.length}/${st.count} 张。`);
   } else {
-    // 当前模板：--job 模式下用 UI 下发的那份，否则读 config.json
+    // 当前模板：--job / --template 用它们给的那份，否则读 config.json
     if (typeof o._jobTpl === 'string'){
       tpl = o._jobTpl;
       slots = o._jobSlots || [];
@@ -642,9 +768,14 @@ async function main(){
        ★ 有概率槽位时存的是 idxs（可能含 -1 缺席标记），不是线性下标 ——
          线性下标在缺席概率非 1/(N+1) 时无法表示，只能直接存下标。 */
     const seedBase = o.seed ?? Math.floor(Math.random() * 2147483647);
+    /* ★ 两种抽样返回的东西不一样，必须统一成「各槽下标」：
+         · drawProbCombos 直接返回 idxs（数组的数组）
+         · drawCombos 返回【线性下标】（数字）
+       之前把后者的数字直接塞进 idxRows，读取时按数组用 → idxs.map is not a function。
+       无概率的模板（如「提示词合集」）必走这条路，所以是必现崩溃。 */
     const rows = anyProb
       ? drawProbCombos(pools, probs, count)
-      : drawCombos(total, count);
+      : drawCombos(total, count).map(k => decodeIdxs(k, pools));
     st = {
       version: 2,
       stamp: tsStamp(),
@@ -658,7 +789,7 @@ async function main(){
       params: { w: o.w, h: o.h, steps: o.steps, cfg: o.cfg, sampler: o.sampler, scheduler: o.scheduler },
       neg: o.neg,
       idxRows: rows,          // 每张的各槽下标（-1 = 缺席）
-      linears: null,          // v2 起用 idxRows；linears 仅为兼容旧快照保留
+      linears: null,          // v2 起统一存 idxRows；linears 仅为兼容更早的快照保留
       done: []
     };
     if (!o.list) saveState(stateFile, st);

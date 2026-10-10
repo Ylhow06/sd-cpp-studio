@@ -385,6 +385,22 @@ button.b.sm{padding:5px 8px;font-size:12px}
   min-height:78px;font-size:12.5px;line-height:1.7;background:var(--bg2);
   font-family:"Consolas","Microsoft YaHei UI",monospace;
 }
+/* 行号槽 + 取值输入框：并排，行高必须与 textarea 完全一致才能对齐 */
+.slot .nvwrap{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.slot .nvwrap textarea{border:0;border-radius:0;flex:1;min-width:0}
+.slot .nvnum{
+  flex:0 0 auto;min-width:30px;padding:0 6px 0 7px;text-align:right;
+  background:var(--bg3);border-right:1px solid var(--line);
+  color:var(--fg3);opacity:.75;
+  font-family:"Consolas","Microsoft YaHei UI",monospace;
+  font-size:12.5px;line-height:1.7;
+  overflow:hidden;                      /* 由 JS 同步 scrollTop */
+  user-select:none;
+}
+.slot .nvnum div{line-height:1.7;font-variant-numeric:tabular-nums}
+/* textarea 的上下内边距要和行号槽对齐（默认 padding 由全局样式给） */
+.slot .nvwrap textarea{padding-top:6px;padding-bottom:6px}
+.slot .nvnum{padding-top:6px;padding-bottom:6px}
 .slot.off{border-color:rgba(248,81,73,.4)}
 .slot .bad{font-size:11px;color:#ffb3ae;margin-top:6px;display:none}
 .slot.off .bad{display:block}
@@ -767,9 +783,12 @@ button.b.sm{padding:5px 8px;font-size:12px}
             把当前的<b style="color:var(--fg2)">模板 + 数组 + 张数 + 跳过重复</b>整套存下来，
             以后一键使用。也可以用「覆盖」把当前内容存回某个已有模板。
             使用前会先自动备份当前内容，误点了可以撤回。
+            <br>每个模板是独立文件（<b style="color:var(--fg2)">templates\&lt;id&gt;.json</b>），
+            可以直接打开编辑，改完刷新即生效。
           </div>
           <div class="row" style="margin-top:9px">
             <button class="b sm pri" id="tplSaveAs">💾 另存为模板</button>
+            <button class="b sm" id="tplOpenDir" title="在资源管理器里打开模板库目录">📂 模板文件夹</button>
             <button class="b sm" id="tplUndo" style="display:none">↩ 撤回上次使用</button>
           </div>
           <div id="tplLibList"></div>
@@ -1029,6 +1048,7 @@ const S = {
   b: {
     cfgOk: false,        // 配置服务是否可用
     cfgPath: '',         // 配置文件路径（来自 /health）
+    tplDir: '',          // 模板库目录（来自 /health，供「模板文件夹」按钮用）
     cfgDirty: false,     // 有未保存改动
     cfgTimer: null,      // 防抖计时器
     cfgBusy: false,      // 正在写入
@@ -2241,6 +2261,7 @@ async function bootConfig(){
     if (h.ok){
       const j = await h.json();
       S.b.cfgPath = j.configPath || '';
+      S.b.tplDir = j.templatesDir || '';      // 模板库目录（「模板文件夹」按钮用）
     }
   } catch (_){ /* health 失败下面还会试 /config */ }
 
@@ -3324,11 +3345,41 @@ function renderSlotEditor(){
     nv.placeholder = '每行一条取值\n黑色皮夹克内搭白T恤\n黄色针织马甲配牛仔短裙';
     nv.oninput = () => { onSlotEdit(); };
 
+    /* 行号槽：textarea 没法自己显示行号，用一个并排的 div 同步滚动。
+       行号按【逻辑行数】生成（换行符个数 + 1），不做软换行折算 ——
+       取值是「一行一条」，软换行折算反而会让编号和内容对不上。 */
+    const wrap = document.createElement('div');
+    wrap.className = 'nvwrap';
+    const gutter = document.createElement('div');
+    gutter.className = 'nvnum';
+    gutter.setAttribute('aria-hidden', 'true');
+    const syncGutter = () => {
+      const n = nv.value.split('\n').length;
+      if (gutter.childElementCount !== n){
+        const frag = document.createDocumentFragment();
+        for (let k = 1; k <= n; k++){
+          const d = document.createElement('div');
+          d.textContent = String(k);
+          frag.appendChild(d);
+        }
+        gutter.textContent = '';
+        gutter.appendChild(frag);
+      }
+      gutter.scrollTop = nv.scrollTop;      // 跟随垂直滚动
+    };
+    nv.addEventListener('input', syncGutter);
+    nv.addEventListener('scroll', syncGutter);
+    // 首屏与后续程序化改值（如套用模板）都要刷新
+    nv.__syncGutter = syncGutter;
+    syncGutter();
+
+    wrap.append(gutter, nv);
+
     const bad = document.createElement('div');
     bad.className = 'bad';
     bad.textContent = '⚠ 这个数组是空的，或名称与模板对不上';
 
-    el.append(sh, nv, bad);
+    el.append(sh, wrap, bad);
     box.appendChild(el);
   });
 }
@@ -3495,6 +3546,39 @@ async function tplDelete(id){
   } catch (e){
     setStat('模板删除失败：' + e.message, 'off');
     return false;
+  }
+}
+
+/** 在资源管理器里打开模板库目录。
+ *  路径来自服务端 /health 的 templatesDir —— 浏览器拿不到本机绝对路径。
+ *  目录不存在时让服务端建出来（空库时也能打开，方便手动放模板文件）。 */
+async function openTplDir(){
+  let dir = S.b.tplDir;
+  if (!dir){
+    // health 没拿到（例如启动顺序问题）→ 现场再问一次
+    try {
+      const h = await fetch(CFG_URL + '/health', { cache: 'no-store' });
+      if (h.ok){ const j = await h.json(); dir = j.templatesDir || ''; S.b.tplDir = dir; }
+    } catch (_){}
+  }
+  if (!dir){
+    setStat('拿不到模板库路径 —— 配置服务可能没启动。', 'off');
+    return;
+  }
+  try {
+    const r = await fetch(CFG_URL + '/open-dir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok){
+      setStat('打开失败：' + (j.error || ('HTTP ' + r.status)), 'off');
+      return;
+    }
+    setStat('已在资源管理器打开模板库：' + j.path, 'on');
+  } catch (e){
+    setStat('打开失败：' + e.message, 'off');
   }
 }
 
@@ -4467,6 +4551,8 @@ async function runBatchLoop(startAt){
   if (bsa) bsa.onclick = saveAsTemplate;
   const bub = $('#tplUndo');
   if (bub) bub.onclick = undoTemplate;
+  const bod = $('#tplOpenDir');
+  if (bod) bod.onclick = openTplDir;
 
   const pr = $('#prevRoll');
   if (pr){

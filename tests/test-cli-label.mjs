@@ -25,10 +25,11 @@ if (from < 0 || to < 0 || to <= from){
   process.exit(1);
 }
 const mod = new Function(`
+const ABSENT = -1;                 // 缺席标记：comboLabels 会用到（槽位概率功能引入）
 ${src.slice(from, to)}
-return { LABEL_CHARS, LABEL_SEP, labelOf, dwidth, dpad, labelWidths, comboLabels };
+return { LABEL_CHARS, LABEL_SEP, labelOf, dwidth, dpad, labelWidths, comboLabels, ABSENT };
 `)();
-const { LABEL_CHARS, LABEL_SEP, labelOf, dwidth, dpad, labelWidths, comboLabels } = mod;
+const { LABEL_CHARS, LABEL_SEP, labelOf, dwidth, dpad, labelWidths, comboLabels, ABSENT } = mod;
 
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { c ? (pass++, console.log('  ✓ ' + n)) : (fail++, console.log('  ✗ ' + n + (e ? '  → ' + e : ''))); };
@@ -110,6 +111,20 @@ console.log('\n=== 4. 真实规模：5 槽长句必须单行放得下 ===');
   ok('每个标签 ≤ 5 字 + 省略号（≤12 格）', w.every(x => x <= 12), JSON.stringify(w));
   ok('标签数与槽数一致', s.split(LABEL_SEP).length === 5, s.split(LABEL_SEP).length);
   console.log('        样例：' + s);
+}
+
+console.log('\n=== 4b. 缺席槽显示「—」===');
+{
+  const pools = [['黑色长发披肩'], ['室内暖色灯光']];
+  const names = ['发型', '氛围'];
+  const w = labelWidths(pools, names);
+  // 槽 0 缺席、槽 1 有值
+  const s = comboLabels([ABSENT, 0], pools, w);
+  ok('缺席位显示 —', s.includes('—'), s);
+  ok('缺席槽不显示取值、另一槽照常显示',
+     !s.includes('黑色长发披') && s.includes('室内暖色灯'), s);
+  const both = comboLabels([ABSENT, ABSENT], pools, w);
+  ok('全缺席也不炸', both.split(LABEL_SEP).length === 2, both);
 }
 
 console.log('\n=== 5. 不变量：标签 ≠ 提示词 ===');

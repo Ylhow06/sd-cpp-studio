@@ -633,6 +633,9 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (p === '/health' && req.method === 'GET') {
+      // ★ 顺手把模板目录建出来：模板库为空时「打开模板文件夹」也能用
+      //   （用户可以先手动往里放模板文件）。失败不影响 health。
+      try { await fsp.mkdir(TPL_DIR, { recursive: true }); } catch {}
       sendJSON(res, 200, {
         ok: true, configPath: CONFIG_PATH, version: 1, templatesDir: TPL_DIR,
         openDir: { enabled: true, lastSaveDir }
