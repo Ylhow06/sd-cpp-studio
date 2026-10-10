@@ -1033,7 +1033,7 @@ const S = {
     cfgTimer: null,      // 防抖计时器
     cfgBusy: false,      // 正在写入
     preview: [],         // 当前预览的取值组合 [{idx:[...], text}]
-    templates: [],       // 用户模板库 [{id,name,at,template,slots,count,skipDup}]
+    templates: [],       // 用户模板库，来自 /templates（一个模板一个文件）
     tplBackup: null,     // 恢复模板前的自动备份（只留最近一次）
     activeTplId: null,   // 当前套用的模板 id（用于列表高亮）
     plan: null,          // 磁盘上的批次计划
@@ -3085,8 +3085,10 @@ async function cfgLoad(){
       S.m.batch.skipDup = c.batch.skipDup !== false;
     }
     S.b.plan = c.plan || null;
-    // 恢复用户模板库
-    S.b.templates = Array.isArray(c.templates) ? c.templates : [];
+    // ★ 模板库不再随配置返回，改从 /templates 拉（一个模板一个文件）。
+    //   拉不到就保留现有列表，不清空 —— 避免服务端临时故障看起来像「模板全没了」。
+    const tpls = await tplLoad();
+    if (tpls) S.b.templates = tpls;
     // 恢复保存目录的真实路径（有记过就不用再填）
     DIR.realPath = typeof c.saveDir === 'string' ? c.saveDir : '';
     if (DIR.realPath) reportRealPath(DIR.realPath);   // 静默向服务端重新登记
@@ -3143,8 +3145,8 @@ async function cfgSaveNow(){
       },
       // ★ 保存目录的真实路径：浏览器自己拿不到，只能由用户填一次后记在这里
       saveDir: DIR.realPath || '',
-      // ★ 用户模板库（整套可复现快照）
-      templates: S.b.templates || [],
+      // ★ 模板库已改为独立文件（<模板目录>/<id>.json），
+      //   不再随配置提交 —— 每次保存都带上它正是「手改被整份覆盖」的根因。
       plan: S.b.plan
     };
     const r = await fetch(CFG_URL + '/config', {
@@ -3425,17 +3427,18 @@ function escapeHtml(s){
        - 覆盖：把当前面板的内容存回这个已有模板（先确认，不可撤销）
    · 使用前自动把「当前」存进一个备份槽，可一键撤回（只留最近一次）
    · 与「恢复默认模板」并列，不互相取代
-   · 落盘在 config.json 的 templates 字段，上限 20 个
+   · ★ 落盘在 <模板目录>/<id>.json，一个模板一个文件（不再挤在 config.json）
+       权威源是独立文件：手工打开某个文件改完即生效，不会被整份配置覆盖
+       文件名用 id（稳定、无中文/空格转义问题），改名不动文件
+       数量不再设上限
    ══════════════════════════════════════════════════ */
-
-const TPL_MAX = 20;
 
 /** 把当前批量面板的状态打包成一个模板对象。 */
 function snapshotBatch(name){
   saveBatchPane();                 // 先同步 DOM → 状态，避免存到旧内容
   const b = S.m.batch;
   return {
-    id: 'tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7),
+    id: newTplId(),
     name: String(name || '').trim().slice(0, 60),
     at: Date.now(),
     template: b.template || '',
@@ -3443,6 +3446,56 @@ function snapshotBatch(name){
     count: Math.max(1, Math.floor(+b.count || 1)),
     skipDup: !!b.skipDup
   };
+}
+
+/** 生成模板 id：只用 [A-Za-z0-9_-]，因为它是文件名的一部分。 */
+function newTplId(){
+  return 'tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+}
+
+/* ────────── 模板库读写（走配置服务的 /templates 接口） ────────── */
+
+/** 拉取全部模板。失败返回 null（调用方据此提示，不静默清空本地列表）。 */
+async function tplLoad(){
+  try {
+    const r = await fetch(CFG_URL + '/templates', { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j || !j.ok || !Array.isArray(j.templates)) throw new Error('返回结构异常');
+    return j.templates;
+  } catch (e){
+    return null;
+  }
+}
+
+/** 写一个模板（新建或覆盖）。返回 true/false。 */
+async function tplPut(t){
+  try {
+    const r = await fetch(CFG_URL + '/templates/' + encodeURIComponent(t.id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(t)
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return true;
+  } catch (e){
+    setStat('模板保存失败：' + e.message, 'off');
+    return false;
+  }
+}
+
+/** 删除一个模板文件。返回 true/false。 */
+async function tplDelete(id){
+  try {
+    const r = await fetch(CFG_URL + '/templates/' + encodeURIComponent(id), { method: 'DELETE' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return true;
+  } catch (e){
+    setStat('模板删除失败：' + e.message, 'off');
+    return false;
+  }
 }
 
 /** 把模板内容套用到面板上（含 DOM 与状态）。 */
@@ -3489,7 +3542,7 @@ function renderTplLib(){
   box.innerHTML = '';
 
   const stat = $('#tplLibStat');
-  if (stat) stat.textContent = list.length ? `${list.length}/${TPL_MAX}` : '';
+  if (stat) stat.textContent = list.length ? `${list.length} 个` : '';
 
   if (!list.length){
     const d = document.createElement('div');
@@ -3567,7 +3620,7 @@ async function overwriteTemplate(id){
   t.at = Date.now();
 
   S.b.activeTplId = t.id;
-  await tplSaveNow();
+  if (!await tplPut(t)) return;          // ★ 只写这一个文件
   renderTplLib();
   setStat(`已用当前内容覆盖模板「${t.name}」（${(t.slots || []).length} 组数组 · ${t.count} 张）。`, 'on');
 }
@@ -3597,20 +3650,16 @@ async function saveAsTemplate(){
     exist.skipDup = snap.skipDup;
     exist.at = Date.now();
     S.b.activeTplId = exist.id;
-    await tplSaveNow();
+    if (!await tplPut(exist)) return;
     renderTplLib();
     setStat(`已覆盖模板「${nm}」。`, 'on');
     return;
   }
 
-  if (S.b.templates.length >= TPL_MAX){
-    setStat(`模板数量已达上限 ${TPL_MAX} 个，先删掉一些再存。`, 'off');
-    return;
-  }
   const snap = snapshotBatch(nm);
+  if (!await tplPut(snap)) return;        // ★ 只写这一个新文件
   S.b.templates.push(snap);
   S.b.activeTplId = snap.id;
-  await tplSaveNow();
   renderTplLib();
   setStat(`模板「${nm}」已保存（${(snap.slots || []).length} 组数组 · ${snap.count} 张）。`, 'on');
 }
@@ -3666,7 +3715,7 @@ async function renameTemplate(id){
   if (dup){ setStat(`已经有叫「${nm}」的模板了，换个名字。`, 'off'); return; }
   t.name = nm;
   t.at = Date.now();
-  await tplSaveNow();
+  if (!await tplPut(t)) return;          // ★ 改名只重写这一个文件，文件名（id）不变
   renderTplLib();
   setStat(`已改名为「${nm}」。`, 'on');
 }
@@ -3677,14 +3726,16 @@ async function deleteTemplate(id){
   if (i < 0) return;
   const t = S.b.templates[i];
   if (!confirm(`删除模板「${t.name}」？\n\n删掉后无法恢复（当前面板上的内容不受影响）。`)) return;
+  if (!await tplDelete(id)) return;       // ★ 只删这一个文件
   S.b.templates.splice(i, 1);
   if (S.b.activeTplId === id) S.b.activeTplId = null;
-  await tplSaveNow();
   renderTplLib();
   setStat(`已删除模板「${t.name}」。`, 'on');
 }
 
-/** 立即把模板库写盘（不等防抖，避免用户存完立刻刷新丢数据） */
+/** 立即把模板库写盘（不等防抖，避免用户存完立刻刷新丢数据）。
+ *  ★ 模板已改为独立文件，不再走 config.json —— 这里只保留
+ *    「把待写的配置刷掉」的语义，供批量面板保存使用。 */
 async function tplSaveNow(){
   if (S.b.cfgTimer){ clearTimeout(S.b.cfgTimer); S.b.cfgTimer = null; }
   return cfgSaveNow();

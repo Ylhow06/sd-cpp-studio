@@ -35,6 +35,25 @@ const CONFIG_PATH = process.env.SDCFG_PATH
   ? path.resolve(process.env.SDCFG_PATH)
   : path.join(__dirname, '..', 'app', 'ui', 'config.json');
 const TMP_PATH = CONFIG_PATH + '.tmp';
+
+/* ★ 模板库目录：一个模板一个文件，模板的权威源就在这里。
+   config.json 不再保存 templates 字段（旧数据启动时自动迁移）。
+
+   为什么拆开（用户实测的痛点）：
+     · 5 个模板挤在 config.json 一个数组里，手工改很难定位
+     · 更糟的是写入是「整份覆盖」：页面内存里持有一份配置副本，
+       任何编辑触发防抖保存就把整份 config.json 覆盖掉 ——
+       手工改过的内容会被静默抹掉
+     拆成独立文件后，一个模板一个文件，直接打开就能改、改完即生效。
+
+   路径推导：默认 <root>/app/ui/templates。
+   ★ 设了 SDCFG_PATH 时（测试用），模板目录跟着配置走 ——
+     这样测试自动隔离，绝不会碰到用户真实的模板库。 */
+const TPL_DIR = process.env.SDTPL_DIR
+  ? path.resolve(process.env.SDTPL_DIR)
+  : (process.env.SDCFG_PATH
+      ? path.join(path.dirname(CONFIG_PATH), 'templates')
+      : path.join(__dirname, '..', 'app', 'ui', 'templates'));
 const HOST = '127.0.0.1';
 const MAX_BODY = 4 * 1024 * 1024;   // 4 MB，配置里只有文本，够用
 
@@ -322,7 +341,7 @@ function openInExplorer(dir) {
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
 }
@@ -373,7 +392,9 @@ function sanitize(cfg) {
     //   仅作为文本保存，不在这里做白名单校验 —— 路径可能暂时不可用，
     //   校验放在真正要用它的 /savedir 和 /open-dir 上。
     saveDir: typeof cfg.saveDir === 'string' ? cfg.saveDir.slice(0, 512) : '',
-    templates: sanitizeTemplates(cfg.templates),
+    // ★ 模板库已迁到 <TPL_DIR>/<id>.json（一个模板一个文件），
+    //   config.json 不再保存该字段。这里显式丢弃旧字段，
+    //   迁移由启动时的 migrateTemplatesFromConfig 完成。
     plan: cfg.plan && typeof cfg.plan === 'object' ? cfg.plan : null
   };
   return out;
@@ -392,16 +413,30 @@ function withProb(slot, p) {
   return slot;
 }
 
-/* ────────── 用户模板库 ──────────
+/* ────────── 用户模板库（一个模板一个文件） ──────────
    每个模板 = 批量面板的完整可复现状态：
      { id, name, at, template, slots, count, skipDup }
-   只做形状校验与裁剪，业务规则（同名、上限）交给 UI，
+   落盘位置：<TPL_DIR>/<id>.json
+
+   只做形状校验与裁剪，业务规则（同名）交给 UI，
    但服务端也要兜住，避免手工改坏文件后炸掉页面。 */
 
-const TPL_MAX = 20;           // 上限，超出只保留前 N 个
 const TPL_NAME_MAX = 60;
 const TPL_SLOTS_MAX = 40;     // 单个模板最多多少个占位符
 const TPL_VALUES_MAX = 300;   // 单个占位符最多多少条取值
+
+/** id → 文件名。★ 必须严格校验：id 直接来自 HTTP，是路径注入的入口。
+ *  只允许字母/数字/下划线/连字符，长度受限；其余一律拒绝。 */
+const TPL_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function tplFile(id) {
+  if (typeof id !== 'string' || !TPL_ID_RE.test(id)) return null;
+  const f = path.join(TPL_DIR, id + '.json');
+  // 双保险：解析后的绝对路径必须仍落在 TPL_DIR 内（防 `..` 之类绕过）
+  const rel = path.relative(TPL_DIR, f);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return f;
+}
 
 /** 净化模板里的 slot 数组（与 batch.slots 同样的形状要求）。 */
 function sanitizeTplSlots(raw) {
@@ -419,34 +454,107 @@ function sanitizeTplSlots(raw) {
   return out;
 }
 
-function sanitizeTemplates(raw) {
-  if (!Array.isArray(raw)) return [];
-  const out = [];
-  const seenIds = new Set();
-  for (const t of raw) {
-    if (!t || typeof t !== 'object') continue;
-    if (typeof t.template !== 'string') continue;
-    let name = typeof t.name === 'string' ? t.name.trim() : '';
-    if (!name) continue;
-    if (name.length > TPL_NAME_MAX) name = name.slice(0, TPL_NAME_MAX);
+/** 净化单个模板对象。不合法返回 null。 */
+function sanitizeTemplate(t, fallbackId) {
+  if (!t || typeof t !== 'object') return null;
+  if (typeof t.template !== 'string') return null;
+  let name = typeof t.name === 'string' ? t.name.trim() : '';
+  if (!name) return null;
+  if (name.length > TPL_NAME_MAX) name = name.slice(0, TPL_NAME_MAX);
 
-    // id 缺失/重复就补一个，保证 UI 能稳定索引
-    let id = typeof t.id === 'string' && t.id.trim() ? t.id.trim().slice(0, 64) : '';
-    if (!id || seenIds.has(id)) id = 'tpl_' + Date.now().toString(36) + '_' + out.length;
+  const id = (typeof t.id === 'string' && TPL_ID_RE.test(t.id.trim()))
+    ? t.id.trim()
+    : (fallbackId && TPL_ID_RE.test(fallbackId) ? fallbackId : null);
+  if (!id) return null;
 
-    seenIds.add(id);
-    out.push({
-      id,
-      name,
-      at: Number.isFinite(+t.at) ? +t.at : Date.now(),
-      template: t.template,
-      slots: sanitizeTplSlots(t.slots),
-      count: Number.isFinite(+t.count) ? Math.max(1, Math.floor(+t.count)) : 8,
-      skipDup: t.skipDup !== false
-    });
-    if (out.length >= TPL_MAX) break;
+  return {
+    id,
+    name,
+    at: Number.isFinite(+t.at) ? +t.at : Date.now(),
+    template: t.template,
+    slots: sanitizeTplSlots(t.slots),
+    count: Number.isFinite(+t.count) ? Math.max(1, Math.floor(+t.count)) : 8,
+    skipDup: t.skipDup !== false
+  };
+}
+
+/** 读取整个模板库（按 at 倒序，与旧列表顺序一致）。 */
+async function readTemplates() {
+  let names;
+  try {
+    names = await fsp.readdir(TPL_DIR);
+  } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw e;
   }
+  const out = [];
+  for (const n of names) {
+    if (!n.endsWith('.json')) continue;
+    const id = n.slice(0, -'.json'.length);
+    if (!TPL_ID_RE.test(id)) continue;
+    try {
+      const raw = await fsp.readFile(path.join(TPL_DIR, n), 'utf8');
+      const t = sanitizeTemplate(JSON.parse(raw), id);
+      if (t) out.push(t);
+      else console.warn('[warn] 模板文件结构异常，已跳过：' + n);
+    } catch (e) {
+      console.warn('[warn] 模板文件读取失败，已跳过：' + n + ' — ' + e.message);
+    }
+  }
+  out.sort((a, b) => (b.at || 0) - (a.at || 0));
   return out;
+}
+
+/** 原子写单个模板文件。 */
+async function writeTemplate(t) {
+  const f = tplFile(t.id);
+  if (!f) throw new Error('模板 id 不合法：' + t.id);
+  await fsp.mkdir(TPL_DIR, { recursive: true });
+  const tmp = f + '.tmp';
+  const data = JSON.stringify(t, null, 2);
+  const fh = await fsp.open(tmp, 'w');
+  try {
+    await fh.writeFile(data, 'utf8');
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  await fsp.rename(tmp, f);
+}
+
+/** 删除单个模板文件。文件不存在不算错（幂等）。 */
+async function deleteTemplateFile(id) {
+  const f = tplFile(id);
+  if (!f) throw new Error('模板 id 不合法：' + id);
+  try {
+    await fsp.unlink(f);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+}
+
+/** 一次性迁移：config.json 里若有 templates 数组，写成独立文件。
+ *  只在确实有内容时动手；迁移完成后由 writeConfig 落一份不含该字段的配置。
+ *  幂等：重复启动不会重复迁移（字段已被移除）。 */
+async function migrateTemplatesFromConfig(cfg) {
+  const raw = cfg && cfg.templates;
+  if (!Array.isArray(raw) || !raw.length) return 0;
+  let n = 0;
+  for (const t of raw) {
+    const clean = sanitizeTemplate(t, null);
+    if (!clean) continue;
+    try {
+      // ★ 已存在同名文件则不覆盖 —— 独立文件是权威源，
+      //   不能让一次旧配置的启动把用户手改过的模板冲掉。
+      const f = tplFile(clean.id);
+      if (f && fs.existsSync(f)) continue;
+      await writeTemplate(clean);
+      n++;
+    } catch (e) {
+      console.warn('[warn] 迁移模板失败：' + (t && t.name) + ' — ' + e.message);
+    }
+  }
+  return n;
 }
 
 async function readConfig() {
@@ -526,7 +634,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p === '/health' && req.method === 'GET') {
       sendJSON(res, 200, {
-        ok: true, configPath: CONFIG_PATH, version: 1,
+        ok: true, configPath: CONFIG_PATH, version: 1, templatesDir: TPL_DIR,
         openDir: { enabled: true, lastSaveDir }
       });
       return;
@@ -666,6 +774,69 @@ const server = http.createServer(async (req, res) => {
       await writeConfig(clean);
       sendJSON(res, 200, { ok: true, savedAt: Date.now() });
       return;
+    }
+
+    /* ────────── 模板库（一个模板一个文件） ──────────
+       GET    /templates          列出全部模板（含正文）
+       PUT    /templates/<id>     新建或覆盖一个模板
+       DELETE /templates/<id>     删除一个模板
+       id 只允许 [A-Za-z0-9_-]，是文件名的一部分，因此必须严格校验。 */
+
+    if (p === '/templates' && req.method === 'GET') {
+      const list = await readTemplates();
+      sendJSON(res, 200, { ok: true, dir: TPL_DIR, templates: list });
+      return;
+    }
+
+    if (p.startsWith('/templates/')) {
+      const id = decodeURIComponent(p.slice('/templates/'.length));
+      const file = tplFile(id);
+      if (!file) {
+        sendJSON(res, 400, { ok: false, code: 'badid', error: '模板 id 不合法（只允许字母、数字、下划线、连字符）' });
+        return;
+      }
+
+      if (req.method === 'GET') {
+        try {
+          const raw = await fsp.readFile(file, 'utf8');
+          const t = sanitizeTemplate(JSON.parse(raw), id);
+          if (!t) {
+            sendJSON(res, 500, { ok: false, error: '模板文件结构异常' });
+            return;
+          }
+          sendJSON(res, 200, { ok: true, template: t });
+        } catch (e) {
+          if (e.code === 'ENOENT') sendJSON(res, 404, { ok: false, error: '模板不存在' });
+          else sendJSON(res, 500, { ok: false, error: e.message });
+        }
+        return;
+      }
+
+      if (req.method === 'PUT' || req.method === 'POST') {
+        const text = await readBody(req);
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (e) {
+          sendJSON(res, 400, { ok: false, error: 'JSON 解析失败：' + e.message });
+          return;
+        }
+        // 路径里的 id 为准（防止正文里的 id 与文件名不一致）
+        const t = sanitizeTemplate(Object.assign({}, parsed, { id }), id);
+        if (!t) {
+          sendJSON(res, 400, { ok: false, error: '模板结构不合法（需要 name 与 template）' });
+          return;
+        }
+        await writeTemplate(t);
+        sendJSON(res, 200, { ok: true, template: t, savedAt: Date.now() });
+        return;
+      }
+
+      if (req.method === 'DELETE') {
+        await deleteTemplateFile(id);
+        sendJSON(res, 200, { ok: true, deleted: id });
+        return;
+      }
     }
 
     // 兼容：POST /config/reset → 恢复出厂默认
@@ -811,14 +982,45 @@ server.on('error', (e) => {
   process.exit(1);
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`[config] 配置服务已启动  http://${HOST}:${PORT}`);
-  console.log(`[config] 配置文件          ${CONFIG_PATH}`);
-  console.log('[open]   「打开文件夹」已启用（任意存在的目录均可打开，跨站请求会被拒绝）');
-  if (!fs.existsSync(CONFIG_PATH)) {
-    console.log('[config] 配置文件不存在，首次写入时自动创建（当前使用出厂默认）');
+/* ★ 启动前迁移：config.json 里的 templates → 独立文件。
+   必须在 listen 之前完成，否则 UI 一打开读到的模板库是空的。
+   迁移后写回一份不含 templates 的配置（字段被 sanitize 丢弃）。 */
+async function startup() {
+  try {
+    let raw = null;
+    try {
+      raw = await fsp.readFile(CONFIG_PATH, 'utf8');
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+    if (raw) {
+      let parsed = null;
+      try { parsed = JSON.parse(raw); } catch { /* 坏文件交给 readConfig 兜底 */ }
+      if (parsed && Array.isArray(parsed.templates) && parsed.templates.length) {
+        const n = await migrateTemplatesFromConfig(parsed);
+        const clean = sanitize(parsed);
+        if (clean) await writeConfig(clean);
+        console.log(`[config] 已把 ${n} 个模板迁移到独立文件：${TPL_DIR}`);
+        if (n < parsed.templates.length) {
+          console.log(`[config] （${parsed.templates.length - n} 个已存在同名文件，按「独立文件为准」跳过）`);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[warn] 模板迁移失败（不影响启动）：' + e.message);
   }
-});
+
+  server.listen(PORT, HOST, () => {
+    console.log(`[config] 配置服务已启动  http://${HOST}:${PORT}`);
+    console.log(`[config] 配置文件          ${CONFIG_PATH}`);
+    console.log(`[config] 模板库目录        ${TPL_DIR}`);
+    console.log('[open]   「打开文件夹」已启用（任意存在的目录均可打开，跨站请求会被拒绝）');
+    if (!fs.existsSync(CONFIG_PATH)) {
+      console.log('[config] 配置文件不存在，首次写入时自动创建（当前使用出厂默认）');
+    }
+  });
+}
+startup();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {

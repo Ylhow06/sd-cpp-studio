@@ -41,6 +41,10 @@ const api = {
   drives:  () => req('GET', '/drives'),
   getCfg:  () => req('GET', '/config'),
   putCfg:  c  => req('POST', '/config', c),
+  listTpl: () => req('GET', '/templates'),
+  getTpl:  id => req('GET', '/templates/' + encodeURIComponent(id)),
+  putTpl:  (id, t) => req('PUT', '/templates/' + encodeURIComponent(id), t),
+  delTpl:  id => req('DELETE', '/templates/' + encodeURIComponent(id)),
   raw:     (m, p, h) => req(m, p, undefined, h)
 };
 
@@ -241,66 +245,87 @@ console.log('\n=== I. saveDir 持久化 ===');
   }
 }
 
-console.log('\n=== K. templates 落盘与净化 ===');
+console.log('\n=== K. 模板库（一个模板一个文件） ===');
 {
   const before = await api.getCfg();
   const batch = before.body.config.batch;
 
-  const good = {
-    id: 'tpl_1', name: '  测试模板  ', at: 1234567890,
-    template: '内容 {{服装}}',
-    slots: [{ name: '服装', values: ['a', 'b'] }],
-    count: 4, skipDup: false
-  };
+  /* ★ 模板已从 config.json 迁到独立文件，config 不再有 templates 字段。
+     这里改测 /templates 接口：CRUD + 净化 + id 安全。 */
+
+  // K1. config 里不该再有 templates
+  chk(!('templates' in before.body.config), '★ config 不含 templates 字段（已迁到独立文件）');
+
+  // K2. 即使请求里塞了 templates，也不会落进 config
   const put = await api.putCfg({
     version: 1, batch, saveDir: '', plan: null,
-    templates: [
-      good,
-      { name: '', template: 'x' },              // 名字为空 → 丢弃
-      { name: 'n', template: 123 },             // template 非字符串 → 丢弃
-      { template: '没有名字' },                  // 缺名字 → 丢弃
-      null, 'xxx', 42,                          // 非对象 → 丢弃
-      { id: 'tpl_1', name: '重复id', template: 'y', slots: [], count: 1, skipDup: true }
-    ]
+    templates: [{ id: 'tpl_sneak', name: '偷偷塞的', template: 'x' }]
   });
-  chk(put.status === 200 && put.body.ok, '写入带 templates 的配置成功');
-
+  chk(put.status === 200 && put.body.ok, '写入带 templates 的配置仍成功');
   const after = await api.getCfg();
-  const ts = after.body.config.templates;
-  chk(Array.isArray(ts), '★ templates 读回是数组');
-  chk(ts.length === 2, `★ 坏数据被净化掉（2 个有效，实际 ${ts.length}）`);
-  chk(ts[0].name === '测试模板', `★ 名字两端空白被裁剪（「${ts[0].name}」）`);
-  chk(ts[0].count === 4 && ts[0].skipDup === false, '★ count / skipDup 原样保留');
-  chk(ts[0].template === '内容 {{服装}}', '★ 模板正文保留');
-  chk(ts[0].slots[0].values.join(',') === 'a,b', '★ 数组保留');
-  chk(ts[1].id !== 'tpl_1', '★ 重复 id 被重新分配（避免 UI 索引冲突）');
-  chk(typeof ts[1].id === 'string' && ts[1].id.length > 0, '新 id 非空');
+  chk(!('templates' in after.body.config), '★ 塞进 config 的 templates 被丢弃');
 
-  // 上限：塞 30 个应只留 20
-  const many = Array.from({ length: 30 }, (_, i) => ({
-    id: 'x' + i, name: 'M' + i, at: i, template: 't' + i, slots: [], count: 1, skipDup: true
-  }));
-  await api.putCfg({ version: 1, batch, saveDir: '', plan: null, templates: many });
-  const capped = (await api.getCfg()).body.config.templates;
-  chk(capped.length === 20, `★ 服务端硬上限 20（实际 ${capped.length}）`);
+  // K3. 列表接口可用
+  const list0 = await api.listTpl();
+  chk(list0.status === 200 && list0.body.ok, 'GET /templates 成功');
+  chk(Array.isArray(list0.body.templates), '★ templates 是数组');
 
-  // 非数组 → 空数组
-  await api.putCfg({ version: 1, batch, saveDir: '', plan: null, templates: 'not-array' });
-  const notArr = (await api.getCfg()).body.config.templates;
-  chk(Array.isArray(notArr) && notArr.length === 0, '★ templates 非数组时归一化为空数组');
+  // K4. 新建 + 净化（名字裁剪、概率保留）
+  const id = 'tpl_test_k_' + Date.now().toString(36);
+  const good = {
+    name: '  测试模板  ', at: 1234567890,
+    template: '内容 {{服装}}',
+    slots: [{ name: '服装', values: ['a', 'b'], p: 0.25 }],
+    count: 4, skipDup: false
+  };
+  const w = await api.putTpl(id, good);
+  chk(w.status === 200 && w.body.ok, 'PUT /templates/<id> 新建成功');
+  chk(w.body.template.name === '测试模板', `★ 名字两端空白被裁剪（「${w.body.template.name}」）`);
+  chk(w.body.template.count === 4 && w.body.template.skipDup === false, '★ count / skipDup 原样保留');
+  chk(w.body.template.template === '内容 {{服装}}', '★ 模板正文保留');
+  chk(w.body.template.slots[0].values.join(',') === 'a,b', '★ 数组保留');
+  chk(w.body.template.slots[0].p === 0.25, '★ 概率 p 保留');
 
-  // plan 与 templates 互不影响
-  await api.putCfg({ version: 1, batch, saveDir: '', plan: { id: 'p1', status: 'paused' }, templates: [good] });
+  // K5. 能读回
+  const rd = await api.getTpl(id);
+  chk(rd.status === 200 && rd.body.template.name === '测试模板', 'GET /templates/<id> 读回正确');
+
+  // K6. 坏数据被拒（不再「静默丢弃」，而是明确报错）
+  const bad1 = await api.putTpl(id, { name: '', template: 'x' });
+  chk(bad1.status === 400, `name 为空 → 400（实际 ${bad1.status}）`);
+  const bad2 = await api.putTpl(id, { name: 'n', template: 123 });
+  chk(bad2.status === 400, `template 非字符串 → 400（实际 ${bad2.status}）`);
+
+  // K7. id 安全：路径注入一律拒绝
+  const evil = ['..%2F..%2Fconfig', 'a%2Fb', 'a%5Cb', 'x'.repeat(65), 'a b'];
+  let allBad = true;
+  for (const e of evil){
+    const rr = await api.getTpl(e);
+    if (rr.status !== 400 && rr.status !== 404) allBad = false;
+  }
+  chk(allBad, '★ 非法 id 全部被拒（防路径注入）');
+  const cross = await api.putTpl('..%2Fevil', { name: 'e', template: 'x' });
+  chk(cross.status === 400, `★ 路径穿越写入被拒（${cross.status}）`);
+
+  // K8. 删除 + 幂等
+  const d1 = await api.delTpl(id);
+  chk(d1.status === 200 && d1.body.ok, 'DELETE /templates/<id> 成功');
+  const gone = await api.getTpl(id);
+  chk(gone.status === 404, '删除后读不到');
+  const d2 = await api.delTpl(id);
+  chk(d2.status === 200, '重复删除幂等');
+
+  // K9. plan 与模板库互不影响
+  await api.putCfg({ version: 1, batch, saveDir: '', plan: { id: 'p1', status: 'paused' } });
   const both = (await api.getCfg()).body.config;
-  chk(both.plan && both.plan.id === 'p1', 'plan 与 templates 可共存');
-  chk(both.templates.length === 1, 'templates 也在');
+  chk(both.plan && both.plan.id === 'p1', 'plan 正常保存');
+  chk(!('templates' in both), 'plan 存在时 config 仍不含 templates');
 
   // 还原
   await api.putCfg({
     version: 1, batch: before.body.config.batch,
     saveDir: before.body.config.saveDir,
-    plan: before.body.config.plan,
-    templates: before.body.config.templates || []
+    plan: before.body.config.plan
   });
 }
 

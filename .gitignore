@@ -19,6 +19,9 @@ out/
 app/ui/config.json
 app/ui/config.json.tmp
 
+# 用户模板库：一个模板一个文件，属个人数据，不共享
+app/ui/templates/
+
 # 临时 / 回收
 _trash/
 _*.mjs

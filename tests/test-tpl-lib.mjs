@@ -6,11 +6,11 @@
      B. 重名 → 覆盖
      C. 恢复：套用内容 + 恢复前自动备份
      D. 撤回：回到恢复前的状态
-     E. 重命名 / 删除 / 上限
-     F. 落盘：templates 写进 config
-     G. 刷新（cfgLoad）后模板库还在
+     E. 重命名 / 删除 / 无数量上限
+     F. 落盘：模板写进独立文件（不再进 config.json）
+     G. 刷新（cfgLoad）后从 /templates 恢复模板库
      H. 「恢复默认模板」也应可撤回
-     I. 边界：空模板不允许存、名字为空、上限拦截
+     I. 边界：空模板不允许存、名字为空
    ══════════════════════════════════════════════════════════════ */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -49,8 +49,11 @@ const stubCtx = {
   measureText(){ return { width: 0 }; }, fillText(){}, strokeText(){}
 };
 
-// 记录写盘请求，验证 templates 真的进了 payload
+// 记录写盘请求，验证模板真的进了 payload
 const saved = [];
+/* ★ 模板库的模拟存储：真服务端是 <tpl_dir>/<id>.json，这里用 Map 等价模拟。
+   模板不再进 config.json，所以断言要针对 /templates 接口而不是 payload。 */
+const tplStore = new Map();
 let promptAnswer = null;
 let confirmAnswer = true;
 
@@ -77,6 +80,35 @@ const dom = new JSDOM(html, {
       const u = String(url);
       const method = (opt.method || 'GET').toUpperCase();
       const mk = (status, obj) => ({ ok: status >= 200 && status < 300, status, json: async () => obj });
+
+      /* ★ 模板库已改为独立文件（/templates/<id>.json），不再走 config.json。
+         这里用内存 Map 模拟服务端的模板文件存储，语义与真服务一致：
+         PUT 写入、DELETE 删除、GET 列表按 at 倒序。 */
+      if (u.includes('/templates')){
+        const m = u.match(/\/templates\/([^/?#]+)/);
+        if (m){
+          const id = decodeURIComponent(m[1]);
+          if (method === 'DELETE'){ tplStore.delete(id); return mk(200, { ok: true, deleted: id }); }
+          if (method === 'GET'){
+            const t = tplStore.get(id);
+            return t ? mk(200, { ok: true, template: t }) : mk(404, { ok: false, error: '模板不存在' });
+          }
+          if (method === 'PUT' || method === 'POST'){
+            let body = null; try { body = JSON.parse(opt.body); } catch {}
+            if (!body || !body.name || typeof body.template !== 'string'){
+              return mk(400, { ok: false, error: '模板结构不合法' });
+            }
+            const t = Object.assign({}, body, { id });
+            tplStore.set(id, t);
+            saved.push(body);
+            return mk(200, { ok: true, template: t });
+          }
+        }
+        // 列表
+        const list = [...tplStore.values()].sort((a, b) => (b.at || 0) - (a.at || 0));
+        return mk(200, { ok: true, dir: 'X', templates: list });
+      }
+
       if (u.includes('/health')) return mk(200, { ok: true, configPath: 'X', openDir: { enabled: true, lastSaveDir: null } });
       if (u.includes('/drives')) return mk(200, { ok: true, drives: ['C:\\', 'D:\\'] });
       if (u.includes('/config') && method === 'POST'){
@@ -162,8 +194,11 @@ console.log('=== A. 另存为：整包保存 ===');
 
   chk(saved.length >= 1, '★ 触发了一次写盘');
   const p = lastSaved();
-  chk(Array.isArray(p.templates) && p.templates.length === 1, '★ payload 里带了 templates');
-  chk(p.templates[0].name === '测试模板A', 'payload 内容正确');
+  chk(!('templates' in p), '★ config payload 不再带 templates（已拆成独立文件）');
+  chk(tplStore.size === 1, `★ 模板写进了独立文件存储（${tplStore.size} 个）`);
+  const stored = [...tplStore.values()][0];
+  chk(stored.name === '测试模板A', '独立文件里的内容正确');
+  chk(stored.id === list[0].id, '独立文件名（id）与列表一致');
 }
 
 console.log('\n=== B. 重名 → 覆盖 ===');
@@ -298,13 +333,15 @@ console.log('\n=== D. 撤回：回到使用前 ===');
   chk(S().template === '临时乱改的 {{X}}', '★ 无备份时撤回不改变内容');
 }
 
-console.log('\n=== E. 重命名 / 删除 / 上限 ===');
+console.log('\n=== E. 重命名 / 删除 / 无上限 ===');
 {
   const idA = TB().find(t => t.name === '测试模板A').id;
   promptAnswer = '改名后的A';
   await w.eval(`renameTemplate(${JSON.stringify(idA)})`);
   await tick();
   chk(TB().find(t => t.id === idA).name === '改名后的A', '★ 重命名生效');
+  chk(tplStore.get(idA).name === '改名后的A', '★ 改名写回了独立文件');
+  chk(tplStore.has(idA), '★ 改名不改文件名（仍按 id 存）');
 
   // 改成已存在的名字应被拒
   promptAnswer = '测试模板C';
@@ -325,12 +362,14 @@ console.log('\n=== E. 重命名 / 删除 / 上限 ===');
   await tick();
   chk(TB().length === 1, `★ 删除生效（剩 ${TB().length}）`);
   chk(!TB().some(t => t.id === idC), '被删的确实没了');
+  chk(!tplStore.has(idC), '★ 独立文件也被删掉了');
 
   // 删除时取消
   confirmAnswer = false;
   await w.eval(`deleteTemplate(${JSON.stringify(idA)})`);
   await tick();
   chk(TB().length === 1, '★ 取消删除后仍在');
+  chk(tplStore.has(idA), '取消删除后独立文件仍在');
   confirmAnswer = true;
 }
 
@@ -366,58 +405,46 @@ console.log('\n=== I. 边界 ===');
   await tick();
   chk(TB().length === before, '★ 取消命名不保存');
 
-  // 上限
-  setPane('批量填上限', [], 1, true);
+  // 不再有数量上限（模板是一个模板一个文件）
+  setPane('批量填很多', [], 1, true);
   for (let i = 0; i < 25; i++){
     promptAnswer = '填充' + i;
     await w.eval('saveAsTemplate()');
   }
   await tick();
-  chk(TB().length === 20, `★ 上限 20 生效（实际 ${TB().length}）`);
+  chk(TB().length > 20, `★ 不再有 20 个上限（实际 ${TB().length}）`);
+  chk(tplStore.size === TB().length, `★ 每个模板都有独立文件（${tplStore.size} 个）`);
 }
 
-console.log('\n=== F. 落盘里的 templates 结构 ===');
+console.log('\n=== F. 落盘：模板写进独立文件而非 config ===');
 {
   const p = lastSaved();
-  chk(Array.isArray(p.templates), 'payload.templates 是数组');
-  chk(p.templates.length === 20, 'payload 里带上了全部 20 个');
-  const t = p.templates[0];
+  chk(!('templates' in p), '★ config payload 里没有 templates');
+  chk(tplStore.size > 0, `★ 模板存在独立文件存储里（${tplStore.size} 个）`);
+  const t = [...tplStore.values()][0];
   chk(['id', 'name', 'at', 'template', 'slots', 'count', 'skipDup'].every(k => k in t),
       '★ 每个模板字段齐全');
   chk(!('tplBackup' in p), '★ 备份不会写进磁盘（只存在内存，刷新即弃）');
 }
 
-console.log('\n=== G. 刷新后模板库仍在 ===');
+console.log('\n=== G. 刷新后模板库仍在（从 /templates 拉取）===');
 {
-  // 模拟 cfgLoad 恢复
-  const snapshot = JSON.parse(JSON.stringify(lastSaved().templates));
+  const snapshot = JSON.parse(JSON.stringify([...tplStore.values()]));
   w.eval(`S.b.templates = []; S.b.activeTplId = null; renderTplLib();`);
   chk(TB().length === 0, '前置：已清空');
 
-  const origFetch = w.fetch;
-  w.fetch = async (u, o = {}) => {
-    if (String(u).includes('/config') && (o.method || 'GET').toUpperCase() === 'GET'){
-      return { ok: true, status: 200, json: async () => ({
-        ok: true, existed: true,
-        config: { version: 1, batch: { template: 'x', slots: [], skipDup: true, count: 8 },
-                  saveDir: '', templates: snapshot, plan: null }
-      }) };
-    }
-    return origFetch(u, o);
-  };
+  // cfgLoad 现在从 /templates 拉模板库（mock 已按真服务语义实现）
   await w.eval('cfgLoad()');
   await tick();
 
-  chk(TB().length === 20, `★ cfgLoad 恢复了 ${TB().length} 个模板`);
-  chk(TB()[0].name === '填充0' || TB().some(t => t.name === '填充0'), '名字完好');
+  chk(TB().length === snapshot.length, `★ cfgLoad 恢复了 ${TB().length} 个模板（期望 ${snapshot.length}）`);
+  chk(TB().some(t => t.name === '填充0'), '名字完好');
   // ★ 走真实的启动路径（bootConfig），它会在任何模式下都渲染一次模板库。
-  //   直接调 cfgLoad() 不会触发渲染，那是测试写法与产品路径的差异。
-  //   注意：bootConfig 会重新 fetch，所以 mock 必须保持到它跑完。
   await w.eval('bootConfig()');
   await tick();
-  chk($('#tplLibList').children.length === 20, `★ 列表渲染出 20 行（实际 ${$('#tplLibList').children.length}）`);
-  chk($('#tplLibStat').textContent === '20/20', `★ 计数显示 20/20（实际「${$('#tplLibStat').textContent}」）`);
-  w.fetch = origFetch;
+  const n = TB().length;
+  chk($('#tplLibList').children.length === n, `★ 列表渲染出 ${n} 行（实际 ${$('#tplLibList').children.length}）`);
+  chk($('#tplLibStat').textContent === `${n} 个`, `★ 计数显示「${n} 个」（实际「${$('#tplLibStat').textContent}」）`);
 }
 
 console.log('\n=== J. 列表 UI ===');
@@ -426,7 +453,7 @@ console.log('\n=== J. 列表 UI ===');
   w.eval('renderTplLib()');
   const rows = [...$('#tplLibList').querySelectorAll('.tpl')];
   console.log('  [debug] rows len =', rows.length);
-  chk(rows.length === 20, `每行一个模板（${rows.length}）`);
+  chk(rows.length === TB().length, `每行一个模板（${rows.length}）`);
   const first = rows[0];
   if (!first){ chk(false, '拿不到第一行'); }
   else {
