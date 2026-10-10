@@ -33,7 +33,13 @@ function bad(name, detail){ fail++; problems.push(name + (detail ? ': ' + detail
 const definedIds = new Set();
 for (const m of markup.matchAll(/\bid="([^"]+)"/g)) definedIds.add(m[1]);
 
-console.log(`\n=== HTML 里定义的 id 共 ${definedIds.size} 个 ===`);
+/* ★ 运行时动态创建的 id：不在静态 HTML 里，但确实由脚本自己建出来。
+   这里是显式白名单 —— 只加「确定是动态创建」的，别拿它掩盖打错的 id。
+   当前全部来自占位符弹窗（编辑器是渲染时建的，不是写死在 HTML 里）。 */
+const DYNAMIC_IDS = new Set(['slotDlgName', 'slotDlgLines']);
+for (const id of DYNAMIC_IDS) definedIds.add(id);
+
+console.log(`\n=== HTML 里定义的 id 共 ${definedIds.size} 个（含 ${DYNAMIC_IDS.size} 个动态创建）===`);
 
 /* ── 2. 收集 JS 里引用的 #id ── */
 const refIds = new Set();
@@ -93,10 +99,12 @@ else {
 console.log('\n--- 批量面板必需控件 ---');
 const needIds = ['cfgBar','cfgTxt','cfgPath','planCard','planTitle','planDesc','planResume',
                  'planAbandon','tplBox','tplErr','tplTags','tplStat','tplInsert','tplReset',
-                 'slotList','slotAdd','slotStat','comboLine','comboNum','comboHint',
+                 'slotList','slotAdd','slotStat','slotSummary','comboLine','comboNum','comboHint',
                  'countWarn','skipDup','comboPrev','prevStat','frozenInfo',
                  // 我的模板（用户模板库）
-                 'tplLibStat','tplLibList','tplSaveAs','tplUndo'];
+                 'tplLibStat','tplLibList','tplSaveAs','tplUndo','tplOpenDir',
+                 // 占位符取值弹窗（左选 / 右编辑）
+                 'slotOpen','slotDlg','slotDlgNav','slotDlgEdit','slotDlgClose','slotDlgDone','slotDlgAdd','slotDlgStat'];
 const missCtl = needIds.filter(id => !definedIds.has(id));
 if (missCtl.length) bad('批量面板缺少控件', missCtl.join(', '));
 else ok(`批量面板 ${needIds.length} 个必需控件齐全`);
@@ -128,7 +136,10 @@ const needFns = ['scanSlots','validateTemplate','slotValues','comboCount','rende
                  'slotIsUsed','renderTplTags','validateBatch','escapeHtml','syncBatchLabels',
                  'renderComboPreview','renderFrozenInfo','renderPlanCard','planAbandon',
                  'batchParams','batchBody','generateBatch','resumeBatch','runBatchLoop',
-                 'bootConfig','cloneFactorySlots'];
+                 'bootConfig','cloneFactorySlots',
+                 // 占位符弹窗 + 模板库接口
+                 'renderSlotSummary','openSlotDlg','closeSlotDlg','renderSlotDlg',
+                 'renderSlotDlgNavOnly','tplLoad','tplPut','tplDelete','openTplDir'];
 const missFn = needFns.filter(fn => !new RegExp(`function ${fn}\\s*\\(`).test(js));
 if (missFn.length) bad('缺少函数定义', missFn.join(', '));
 else ok(`全部 ${needFns.length} 个函数都已定义`);

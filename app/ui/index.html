@@ -385,11 +385,20 @@ button.b.sm{padding:5px 8px;font-size:12px}
   min-height:78px;font-size:12.5px;line-height:1.7;background:var(--bg2);
   font-family:"Consolas","Microsoft YaHei UI",monospace;
 }
-/* 行号槽 + 取值输入框：并排，行高必须与 textarea 完全一致才能对齐 */
-.slot .nvwrap{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:6px;overflow:hidden}
-.slot .nvwrap textarea{border:0;border-radius:0;flex:1;min-width:0}
-.slot .nvnum{
-  flex:0 0 auto;min-width:30px;padding:0 6px 0 7px;text-align:right;
+/* ── 行号槽 + 取值输入框 ──
+   ★ 这些规则**不能**限定在 `.slot` 下：同一个组件在弹窗（#slotDlg）里
+     也有一份，限定作用域会导致弹窗里的 .nvwrap 拿不到 display:flex，
+     行号槽与 textarea 就上下堆叠（行号跑到输入框上方）。
+     所以一律挂在 .nvwrap / .nvnum 自身，谁包住都成立。 */
+.nvwrap{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.nvwrap textarea{
+  border:0;border-radius:0;flex:1;min-width:0;
+  font-size:12.5px;line-height:1.7;
+  font-family:"Consolas","Microsoft YaHei UI",monospace;
+  padding-top:6px;padding-bottom:6px;
+}
+.nvnum{
+  flex:0 0 auto;min-width:30px;padding:6px 6px 6px 7px;text-align:right;
   background:var(--bg3);border-right:1px solid var(--line);
   color:var(--fg3);opacity:.75;
   font-family:"Consolas","Microsoft YaHei UI",monospace;
@@ -397,13 +406,25 @@ button.b.sm{padding:5px 8px;font-size:12px}
   overflow:hidden;                      /* 由 JS 同步 scrollTop */
   user-select:none;
 }
-.slot .nvnum div{line-height:1.7;font-variant-numeric:tabular-nums}
-/* textarea 的上下内边距要和行号槽对齐（默认 padding 由全局样式给） */
-.slot .nvwrap textarea{padding-top:6px;padding-bottom:6px}
-.slot .nvnum{padding-top:6px;padding-bottom:6px}
+.nvnum div{line-height:1.7;font-variant-numeric:tabular-nums}
+/* 行号测量用的镜像元素：不可见、不参与布局，只在测量时同步样式 */
+#nvMirror{position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;}
 .slot.off{border-color:rgba(248,81,73,.4)}
 .slot .bad{font-size:11px;color:#ffb3ae;margin-top:6px;display:none}
 .slot.off .bad{display:block}
+
+/* 批量面板上的占位符摘要（编辑器在弹窗里，这里只给一览） */
+.slotsum{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.slotsum .tg{
+  display:inline-flex;align-items:center;gap:5px;cursor:pointer;
+  padding:3px 8px;border-radius:6px;border:1px solid var(--line);background:var(--bg);
+  font-size:11.5px;line-height:1.5;
+}
+.slotsum .tg:hover{border-color:var(--acc2)}
+.slotsum .tg b{color:var(--fg1);font-weight:600}
+.slotsum .tg .n{color:var(--fg3);font-variant-numeric:tabular-nums}
+.slotsum .tg.miss{border-color:rgba(248,81,73,.45)}
+.slotsum .tg.miss b{color:#ffb3ae}
 
 /* 组合数与计划 */
 #comboLine{
@@ -513,6 +534,98 @@ button.b.sm{padding:5px 8px;font-size:12px}
   border-top:1px solid var(--line);background:var(--bg3);
 }
 .pd-note{font-size:11px;color:var(--fg3);flex:1;line-height:1.6}
+
+/* ── 占位符取值编辑器弹窗（左侧选占位符 / 右侧编辑） ──
+   原先所有占位符的编辑器平铺在批量面板里，占位符一多（裙子模板 11 个）
+   整页就被撑得极长，要改某一个得来回滚。改成弹窗后，左侧一列选，
+   右侧只渲染当前这一个。 */
+#slotDlg{
+  position:fixed;inset:0;z-index:45;display:none;align-items:center;justify-content:center;
+  background:rgba(8,10,14,.72);backdrop-filter:blur(3px);
+}
+#slotDlg.show{display:flex}
+.sd-box{
+  width:min(1040px,94vw);height:min(760px,88vh);display:flex;flex-direction:column;
+  background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 24px 70px rgba(0,0,0,.7);overflow:hidden;
+}
+.sd-head{
+  display:flex;align-items:center;gap:9px;padding:13px 16px;
+  border-bottom:1px solid var(--line);font-size:13.5px;
+}
+.sd-head .sd-stat{font-size:11.5px;color:var(--fg3);font-variant-numeric:tabular-nums}
+.sd-head .sd-x{
+  margin-left:auto;cursor:pointer;color:var(--fg3);font-size:14px;padding:2px 6px;border-radius:5px;
+}
+.sd-head .sd-x:hover{background:var(--bg3);color:var(--fg1)}
+.sd-main{flex:1;display:flex;min-height:0}
+
+/* 左：占位符列表 */
+.sd-side{
+  flex:0 0 220px;display:flex;flex-direction:column;min-height:0;
+  border-right:1px solid var(--line);background:var(--bg);
+}
+.sd-side-h{
+  padding:9px 11px;font-size:11px;color:var(--fg3);
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px;
+}
+.sd-side-h b{margin-left:auto;font-variant-numeric:tabular-nums}
+.sd-nav{flex:1;overflow-y:auto;padding:5px}
+.sd-nav .it{
+  padding:7px 9px;border-radius:6px;cursor:pointer;margin-bottom:2px;
+  display:flex;align-items:center;gap:7px;border:1px solid transparent;
+}
+.sd-nav .it:hover{background:var(--bg2)}
+.sd-nav .it.on{background:rgba(76,125,255,.1);border-color:var(--acc)}
+.sd-nav .it.off .nm{color:var(--fg3)}
+.sd-nav .nm{
+  font-size:12.5px;font-weight:600;color:var(--fg1);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;
+}
+.sd-nav .mt{font-size:10.5px;color:var(--fg3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.sd-nav .bad{font-size:10px;color:var(--bad,#ff6b6b);white-space:nowrap}
+.sd-nav .it .pn{
+  font-size:10px;color:var(--fg3);border:1px solid var(--line);
+  border-radius:4px;padding:0 4px;white-space:nowrap;
+}
+.sd-side-f{padding:9px 11px;border-top:1px solid var(--line)}
+.sd-side-f button{width:100%}
+
+/* 右：当前占位符的编辑区 */
+.sd-edit{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.sd-edit-h{
+  display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);
+}
+.sd-edit-h input[type=text]{
+  flex:1;font-size:13px;font-weight:600;padding:6px 10px;background:var(--bg3);
+  border:1px solid var(--line);border-radius:6px;color:var(--fg1);min-width:0;
+}
+.sd-edit-h input[type=text]:focus{outline:none;border-color:var(--acc)}
+.sd-edit-h .pw{display:flex;align-items:center;gap:3px;white-space:nowrap}
+.sd-edit-h .pw input[type=number]{
+  width:58px;padding:5px 6px;font-size:12px;text-align:right;
+  background:var(--bg3);border:1px solid var(--line);border-radius:6px;color:var(--fg);
+  font-variant-numeric:tabular-nums;
+}
+.sd-edit-h .pw .pu{font-size:11px;color:var(--fg3)}
+.sd-edit-b{
+  flex:1;display:flex;flex-direction:column;min-height:0;padding:12px 14px;gap:8px;
+}
+.sd-edit-b .sd-lab{
+  font-size:11px;color:var(--fg3);display:flex;align-items:center;gap:8px;
+}
+.sd-edit-b .sd-lab b{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--fg2)}
+.sd-edit-b .nvwrap{flex:1;min-height:0}
+.sd-edit-b .nvwrap textarea{min-height:0;height:100%;resize:none}
+.sd-edit-f{
+  display:flex;align-items:center;gap:8px;padding:11px 14px;
+  border-top:1px solid var(--line);background:var(--bg3);
+}
+.sd-edit-f .sd-note{font-size:11px;color:var(--fg3);flex:1;line-height:1.6}
+.sd-empty{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  color:var(--fg3);font-size:12px;text-align:center;padding:20px;line-height:1.9;
+}
 </style>
 </head>
 <body>
@@ -796,9 +909,16 @@ button.b.sm{padding:5px 8px;font-size:12px}
 
         <div class="sec">
           <div class="h">随机取值数组 <span class="v" id="slotStat"></span></div>
-          <div id="slotList"></div>
-          <button class="b sm" id="slotAdd" style="width:100%">＋ 新增占位符</button>
+          <div class="row" style="margin-top:9px">
+            <button class="b sm pri" id="slotOpen">✏️ 编辑占位符取值</button>
+            <button class="b sm" id="slotAdd">＋ 新增</button>
+          </div>
+          <div id="slotSummary" class="hint" style="margin-top:9px"></div>
           <div class="hint">每行一条取值。空数组或找不到数组的占位符会被拦下，不会提交生成。</div>
+          <!-- ★ 编辑器本体在弹窗里（#slotDlg）。这里保留 #slotList 作为
+               状态的「真相容器」：saveBatchPane() 从这里读回取值，
+               jsdom 测试也按 #slotList .slot 定位槽位。视觉上不显示。 -->
+          <div id="slotList" hidden></div>
         </div>
 
         <div class="sec">
@@ -979,6 +1099,31 @@ button.b.sm{padding:5px 8px;font-size:12px}
       <button class="b sm" id="pdClear" style="display:none">清除路径</button>
       <button class="b" id="pdCancel">取消</button>
       <button class="b pri" id="pdOk">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 占位符取值编辑器（左选占位符 / 右编辑） ═══ -->
+<div id="slotDlg">
+  <div class="sd-box">
+    <div class="sd-head">
+      <b>随机取值数组</b>
+      <span class="sd-stat" id="slotDlgStat"></span>
+      <span class="sd-x" id="slotDlgClose">✕</span>
+    </div>
+    <div class="sd-main">
+      <div class="sd-side">
+        <div class="sd-side-h">占位符 <b id="slotDlgCount"></b></div>
+        <div class="sd-nav" id="slotDlgNav"></div>
+        <div class="sd-side-f">
+          <button class="b sm" id="slotDlgAdd">＋ 新增占位符</button>
+        </div>
+      </div>
+      <div class="sd-edit" id="slotDlgEdit"></div>
+    </div>
+    <div class="sd-edit-f">
+      <span class="sd-note" id="slotDlgNote">每行一条取值。空数组或找不到数组的占位符会被拦下，不会提交生成。</span>
+      <button class="b pri" id="slotDlgDone">完成</button>
     </div>
   </div>
 </div>
@@ -3262,7 +3407,137 @@ function saveBatchPane(){
   });
 }
 
-/* ────────── 数组编辑器 ────────── */
+/* ────────── 行号槽 ──────────
+   textarea 没有行号 API，用一个并排的 div 同步滚动。
+
+   ★ 必须按【视觉行】编号，不能按逻辑行：
+     长取值会在 textarea 里软换行成多个视觉行（截图里那条「接接接…」就是），
+     若按逻辑行编号，第 2 个编号会落在第 1 条取值的续行上，完全错位。
+     做法：首行给编号，续行给空串占位 —— 编号始终落在「每条取值的开头」。
+
+   textarea 不提供「某逻辑行折成几行」，用一个隐藏镜像元素按相同宽度与
+   字体测量（编辑器通用做法）。镜像只在测量时同步样式，不参与交互。 */
+
+/** 行号项：每条逻辑行 = 一个编号 + (视觉行数-1) 个空占位。 */
+function gutterItemsFor(logicalLines, rowsPerLine){
+  const out = [];
+  logicalLines.forEach((_, i) => {
+    const r = Math.max(1, Math.round(rowsPerLine[i] || 1));
+    out.push(String(i + 1));
+    for (let k = 1; k < r; k++) out.push('');
+  });
+  return out;
+}
+
+/** 行高换算成像素。
+ *  ★ computed 的 line-height 可能是无单位值（如 "1.7"）而不是 "21.25px"
+ *    —— 无单位时必须以元素自身字号为基准换算，否则除出来的行数完全不对。 */
+function resolveLineHeightPx(cs){
+  const raw = cs.lineHeight;
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  if (raw.endsWith('px')) return n;
+  const fs = parseFloat(cs.fontSize) || 0;
+  return fs > 0 ? n * fs : 0;
+}
+
+/** 测量每条逻辑行占几个视觉行。拿不到布局（隐藏 / jsdom）时退化为 1。 */
+function measureVisualRows(ta){
+  const lines = ta.value.split('\n');
+  const cs = getComputedStyle(ta);
+  // clientWidth 含 padding、不含 border，所以内容宽 = clientWidth - 左右 padding
+  const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+  const w = ta.clientWidth - padX;
+  const lh = resolveLineHeightPx(cs);
+  if (!(w > 0) || !(lh > 0)) return lines.map(() => 1);   // 没布局 → 逻辑行
+
+  let mirror = document.getElementById('nvMirror');
+  if (!mirror){
+    mirror = document.createElement('div');
+    mirror.id = 'nvMirror';
+    mirror.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(mirror);
+  }
+  // 与 textarea 完全同款：宽度 + 所有影响折行的排版属性。
+  // ★ 逐项从 textarea 的 computed style 抄，不硬编码 —— 换行规则
+  //   （white-space / overflow-wrap / word-break）由浏览器给 textarea 的默认值
+  //   决定，抄过来才能保证镜像的折行结果与真实输入框一致。
+  mirror.style.cssText =
+    `position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;` +
+    `margin:0;padding:0;border:0;box-sizing:border-box;width:${w}px;` +
+    `font-size:${cs.fontSize};font-family:${cs.fontFamily};line-height:${lh}px;` +
+    `font-weight:${cs.fontWeight};font-style:${cs.fontStyle};` +
+    `letter-spacing:${cs.letterSpacing};word-spacing:${cs.wordSpacing};` +
+    `text-indent:${cs.textIndent};text-transform:${cs.textTransform};` +
+    `white-space:${cs.whiteSpace};overflow-wrap:${cs.overflowWrap};word-break:${cs.wordBreak};`;
+  mirror.textContent = '';
+  const probe = [];
+  for (const ln of lines){
+    const d = document.createElement('div');
+    // 空行也要占一行高，用零宽空格撑住
+    d.textContent = ln === '' ? '\u200b' : ln;
+    mirror.appendChild(d);
+    probe.push(d);
+  }
+  return probe.map(d => Math.max(1, Math.round(d.offsetHeight / lh)));
+}
+
+/** 给一个 textarea 挂上行号槽（返回「重新测量并重绘」的函数）。
+ *  滚动只同步 scrollTop，不重新测量 —— 测量要读 offsetHeight，很贵。 */
+function attachGutter(ta, gutter){
+  const paint = (items) => {
+    if (gutter.childElementCount !== items.length){
+      const frag = document.createDocumentFragment();
+      for (const t of items){
+        const d = document.createElement('div');
+        // 续行占位必须有内容，否则空 div 高度为 0，行号会挤在一起
+        if (t) d.textContent = t;
+        else d.innerHTML = '&nbsp;';
+        frag.appendChild(d);
+      }
+      gutter.textContent = '';
+      gutter.appendChild(frag);
+      return;
+    }
+    // 行数没变但折行分布可能变了（编辑内容时），逐个校对
+    const kids = gutter.children;
+    for (let i = 0; i < items.length; i++){
+      const want = items[i];
+      const el = kids[i];
+      if (want){
+        if (el.textContent !== want) el.textContent = want;
+      } else if (!el.textContent){
+        el.innerHTML = '&nbsp;';            // 补回占位（别让它塌成 0 高）
+      }
+    }
+  };
+
+  const sync = () => {
+    const lines = ta.value.split('\n');
+    paint(gutterItemsFor(lines, measureVisualRows(ta)));
+    gutter.scrollTop = ta.scrollTop;
+  };
+  const follow = () => { gutter.scrollTop = ta.scrollTop; };
+
+  ta.addEventListener('input', sync);
+  ta.addEventListener('scroll', follow);
+  // 宽度变化会影响折行（弹窗打开 / 窗口缩放）
+  if (typeof ResizeObserver === 'function'){
+    try { new ResizeObserver(sync).observe(ta); } catch (_){}
+  }
+  return sync;
+}
+
+/* ────────── 数组编辑器 ──────────
+   编辑器实际渲染在弹窗里（左选占位符 / 右编辑）。
+   但 `#slotList` 里仍然为每个槽位保留一个 `.slot` 容器（含 name/values/prob 控件），
+   原因是：
+     · saveBatchPane() 从 DOM 读回状态，沿用同一套 `[data-slotname]` 约定
+     · jsdom 测试按 `#slotList .slot` 定位槽位（改结构会连带改一大片测试）
+   弹窗只是「同一批控件的另一种摆放」，不引入第二份真相。 */
+
+/** 当前正在编辑的槽位下标（弹窗用）。-1 = 没选。 */
+let slotDlgIndex = -1;
 
 function renderSlotEditor(){
   const box = $('#slotList');
@@ -3345,35 +3620,16 @@ function renderSlotEditor(){
     nv.placeholder = '每行一条取值\n黑色皮夹克内搭白T恤\n黄色针织马甲配牛仔短裙';
     nv.oninput = () => { onSlotEdit(); };
 
-    /* 行号槽：textarea 没法自己显示行号，用一个并排的 div 同步滚动。
-       行号按【逻辑行数】生成（换行符个数 + 1），不做软换行折算 ——
-       取值是「一行一条」，软换行折算反而会让编号和内容对不上。 */
+    // 行号槽（按视觉行编号，见 attachGutter）
     const wrap = document.createElement('div');
     wrap.className = 'nvwrap';
     const gutter = document.createElement('div');
     gutter.className = 'nvnum';
     gutter.setAttribute('aria-hidden', 'true');
-    const syncGutter = () => {
-      const n = nv.value.split('\n').length;
-      if (gutter.childElementCount !== n){
-        const frag = document.createDocumentFragment();
-        for (let k = 1; k <= n; k++){
-          const d = document.createElement('div');
-          d.textContent = String(k);
-          frag.appendChild(d);
-        }
-        gutter.textContent = '';
-        gutter.appendChild(frag);
-      }
-      gutter.scrollTop = nv.scrollTop;      // 跟随垂直滚动
-    };
-    nv.addEventListener('input', syncGutter);
-    nv.addEventListener('scroll', syncGutter);
-    // 首屏与后续程序化改值（如套用模板）都要刷新
-    nv.__syncGutter = syncGutter;
-    syncGutter();
-
     wrap.append(gutter, nv);
+    // 首屏与后续程序化改值（如套用模板）都要刷新
+    nv.__syncGutter = attachGutter(nv, gutter);
+    nv.__syncGutter();
 
     const bad = document.createElement('div');
     bad.className = 'bad';
@@ -3382,6 +3638,279 @@ function renderSlotEditor(){
     el.append(sh, wrap, bad);
     box.appendChild(el);
   });
+
+  // 弹窗开着的话，同步刷新（改名/增删/改概率都会走到这里）
+  if ($('#slotDlg') && $('#slotDlg').classList.contains('show')) renderSlotDlg();
+}
+
+/* ────────── 占位符弹窗：左选 / 右编辑 ────────── */
+
+function openSlotDlg(){
+  const dlg = $('#slotDlg');
+  if (!dlg) return;
+  // 打开时定位到「当前模板里第一个用到的槽位」，没有就选第一个
+  const b = S.m.batch;
+  if (slotDlgIndex < 0 || slotDlgIndex >= b.slots.length){
+    const used = b.slots.findIndex(s => slotIsUsed(s.name));
+    slotDlgIndex = used >= 0 ? used : 0;
+  }
+  dlg.classList.add('show');
+  renderSlotDlg();
+}
+
+function closeSlotDlg(){
+  const dlg = $('#slotDlg');
+  if (dlg) dlg.classList.remove('show');
+  // 关掉时把面板上的占位符标记与校验刷一遍（弹窗里可能改过名字）
+  saveBatchPane();
+  renderTplTags(); syncBatchLabels(); validateBatch();
+}
+
+function renderSlotDlg(){
+  const b = S.m.batch;
+  const nav = $('#slotDlgNav');
+  if (!nav) return;
+
+  // 夹紧下标（可能刚删过）
+  if (slotDlgIndex >= b.slots.length) slotDlgIndex = b.slots.length - 1;
+  if (slotDlgIndex < 0) slotDlgIndex = 0;
+
+  const stat = $('#slotDlgStat');
+  if (stat){
+    const used = b.slots.filter(s => slotIsUsed(s.name)).length;
+    stat.textContent = `${b.slots.length} 个占位符 · ${used} 个被模板引用`;
+  }
+  const cntEl = $('#slotDlgCount');
+  if (cntEl) cntEl.textContent = b.slots.length ? String(b.slots.length) : '';
+
+  /* 左侧列表 */
+  nav.innerHTML = '';
+  if (!b.slots.length){
+    const d = document.createElement('div');
+    d.className = 'hint';
+    d.style.padding = '10px';
+    d.textContent = '还没有占位符。点下面的按钮新增。';
+    nav.appendChild(d);
+  }
+  b.slots.forEach((s, i) => {
+    const used = slotIsUsed(s.name);
+    const n = (s.values || []).length;
+    const it = document.createElement('div');
+    it.className = 'it'
+      + (i === slotDlgIndex ? ' on' : '')
+      + (used && n ? '' : ' off');
+    it.dataset.i = i;
+    it.onclick = () => {
+      if (slotDlgIndex === i) return;
+      saveBatchPane();            // 切走前先把当前编辑写回状态
+      slotDlgIndex = i;
+      renderSlotDlg();
+    };
+
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = s.name || '(未命名)';
+    nm.title = s.name || '(未命名)';
+
+    const mt = document.createElement('span');
+    mt.className = 'mt';
+    mt.textContent = `${n} 条`;
+
+    it.append(nm);
+    const p = slotProb(b.slots, s.name);
+    if (p < 1){
+      const pn = document.createElement('span');
+      pn.className = 'pn';
+      pn.textContent = `${Math.round(p * 100)}%`;
+      pn.title = '出现概率';
+      it.appendChild(pn);
+    }
+    it.appendChild(mt);
+    if (!used || !n){
+      const bd = document.createElement('span');
+      bd.className = 'bad';
+      bd.textContent = used ? '空' : '未用';
+      bd.title = used ? '数组是空的' : '模板里没有引用这个占位符';
+      it.appendChild(bd);
+    }
+    nav.appendChild(it);
+  });
+
+  /* 右侧编辑区 */
+  const ed = $('#slotDlgEdit');
+  if (!ed) return;
+  ed.innerHTML = '';
+  const s = b.slots[slotDlgIndex];
+  if (!s){
+    const e = document.createElement('div');
+    e.className = 'sd-empty';
+    e.innerHTML = '还没有占位符。<br>点左侧「＋ 新增占位符」开始。';
+    ed.appendChild(e);
+    return;
+  }
+
+  const head = document.createElement('div');
+  head.className = 'sd-edit-h';
+
+  const ni = document.createElement('input');
+  ni.type = 'text';
+  ni.id = 'slotDlgName';
+  ni.value = s.name || '';
+  ni.placeholder = '占位符名称（如：服装）';
+  ni.oninput = () => {
+    // 同步到隐藏的真实控件，再走统一的写回逻辑
+    const src = $(`#slotList .slot[data-i="${slotDlgIndex}"] [data-slotname]`);
+    if (src){ src.value = ni.value; }
+    onSlotEdit();
+    renderSlotDlgNavOnly();
+  };
+
+  const pw = document.createElement('span');
+  pw.className = 'pw';
+  const pi = document.createElement('input');
+  pi.type = 'number';
+  pi.id = 'slotDlgProb';
+  pi.min = '1'; pi.max = '100'; pi.step = '1';
+  const pct = Math.round(slotProb(b.slots, s.name) * 100);
+  pi.value = String(pct);
+  pi.title = '该占位符在每张图里出现的概率。100% = 必选（默认）。';
+  pi.oninput = () => {
+    const src = $(`#slotList .slot[data-i="${slotDlgIndex}"] [data-slotprob]`);
+    if (src){ src.value = pi.value; }
+    onSlotEdit();
+    renderSlotDlgNavOnly();
+  };
+  const pu = document.createElement('span');
+  pu.className = 'pu';
+  pu.textContent = '%';
+  const isOptional = pct < 100;
+  const po = document.createElement('button');
+  po.className = 'b sm';
+  po.textContent = isOptional ? '还原' : '可选';
+  po.title = isOptional ? '还原成 100%（必选）' : '一键设为 50%（可选）';
+  po.onclick = () => {
+    const v = isOptional ? '100' : '50';
+    pi.value = v;
+    const src = $(`#slotList .slot[data-i="${slotDlgIndex}"] [data-slotprob]`);
+    if (src){ src.value = v; }
+    onSlotEdit();
+    renderSlotDlg();
+  };
+  pw.append(pi, pu, po);
+
+  const del = document.createElement('button');
+  del.className = 'b sm';
+  del.id = 'slotDlgDel';
+  del.textContent = '🗑 删除';
+  del.title = '删除这个占位符及其全部取值';
+  del.onclick = () => {
+    // 转发给隐藏容器里那个「真正的」删除按钮（确认框与状态写回都在那边，
+    // 避免两套删除逻辑）。★ 不能用 querySelector('button') —— 那会拿到
+    // 「可选/还原」按钮（它在 header 里排更前），点下去变成改概率。
+    const row = $(`#slotList .slot[data-i="${slotDlgIndex}"]`);
+    const btn = row && [...row.querySelectorAll('button')].find(b => b.title === '删除这个占位符');
+    if (btn) btn.click();
+  };
+
+  head.append(ni, pw, del);
+
+  const body = document.createElement('div');
+  body.className = 'sd-edit-b';
+  const lab = document.createElement('div');
+  lab.className = 'sd-lab';
+  lab.textContent = '取值（每行一条）';
+  const nlab = document.createElement('b');
+  nlab.id = 'slotDlgLines';
+  nlab.textContent = `${(s.values || []).length} 条`;
+  lab.appendChild(nlab);
+
+  /* ★ 这里渲染的是弹窗自己的 textarea，**不搬** #slotList 里的那个。
+     因为 saveBatchPane() 是遍历 `#slotList .slot` 读 `[data-slotvals]` 的，
+     把节点搬走会让它读不到 → 用户编辑被静默丢弃。
+     做法：两边双向同步，隐藏的那个始终是 saveBatchPane 读的那份真相。 */
+  const srcTa = $(`#slotList .slot[data-i="${slotDlgIndex}"] [data-slotvals]`);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'nvwrap';
+  const gutter = document.createElement('div');
+  gutter.className = 'nvnum';
+  gutter.setAttribute('aria-hidden', 'true');
+  const ta = document.createElement('textarea');
+  ta.id = 'slotDlgVals';
+  ta.value = (s.values || []).join('\n');
+  ta.placeholder = '每行一条取值\n黑色皮夹克内搭白T恤\n黄色针织马甲配牛仔短裙';
+
+  wrap.append(gutter, ta);
+  const syncGutter = attachGutter(ta, gutter);
+  ta.addEventListener('input', () => {
+    syncGutter();
+    if (srcTa) srcTa.value = ta.value;        // 同步给「真相」控件
+    onSlotEdit();
+    if (nlab) nlab.textContent = `${ta.value.split('\n').map(x => x.trim()).filter(x => x !== '').length} 条`;
+    renderSlotDlgNavOnly();
+  });
+  body.appendChild(lab);
+  body.appendChild(wrap);
+  ed.appendChild(head);
+  ed.appendChild(body);
+
+  /* ★ 必须在挂进文档之后再量：元素不在文档里时宽度为 0，测不出折行。
+     先同步一次，再用 rAF 补一次（拿到真实宽度后的最终结果）。 */
+  syncGutter();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncGutter);
+
+  // 空数组 / 未引用 的提示
+  const usedNow = slotIsUsed(s.name);
+  if (!usedNow){
+    const w = document.createElement('div');
+    w.className = 'sd-lab';
+    w.style.color = 'var(--bad,#ff6b6b)';
+    w.textContent = '⚠ 模板里没有引用这个占位符，改了不会影响出图';
+    ed.appendChild(w);
+  } else if (!(s.values || []).length){
+    const w = document.createElement('div');
+    w.className = 'sd-lab';
+    w.style.color = 'var(--bad,#ff6b6b)';
+    w.textContent = '⚠ 数组是空的，会被拦下，不会提交生成';
+    ed.appendChild(w);
+  }
+}
+
+/** 只刷新左侧列表（改名 / 改概率时用，避免重建编辑区把焦点顶掉）。 */
+function renderSlotDlgNavOnly(){
+  const nav = $('#slotDlgNav');
+  const b = S.m.batch;
+  if (!nav) return;
+  const items = [...nav.querySelectorAll('.it')];
+  if (items.length !== b.slots.length){ renderSlotDlg(); return; }
+  items.forEach((it, i) => {
+    const s = b.slots[i];
+    if (!s) return;
+    const used = slotIsUsed(s.name);
+    const n = (s.values || []).length;
+    it.classList.toggle('on', i === slotDlgIndex);
+    it.classList.toggle('off', !(used && n));
+    const nm = it.querySelector('.nm');
+    if (nm){ nm.textContent = s.name || '(未命名)'; nm.title = s.name || '(未命名)'; }
+    const mt = it.querySelector('.mt');
+    if (mt) mt.textContent = `${n} 条`;
+    // 概率角标
+    let pn = it.querySelector('.pn');
+    const p = slotProb(b.slots, s.name);
+    if (p < 1){
+      if (!pn){ pn = document.createElement('span'); pn.className = 'pn'; it.insertBefore(pn, mt); }
+      pn.textContent = `${Math.round(p * 100)}%`;
+    } else if (pn){ pn.remove(); }
+    // 状态角标
+    let bd = it.querySelector('.bad');
+    if (!used || !n){
+      if (!bd){ bd = document.createElement('span'); bd.className = 'bad'; it.appendChild(bd); }
+      bd.textContent = used ? '空' : '未用';
+    } else if (bd){ bd.remove(); }
+  });
+  const lines = $('#slotDlgLines');
+  const cur = b.slots[slotDlgIndex];
+  if (lines && cur) lines.textContent = `${(cur.values || []).length} 条`;
 }
 
 /** 数组编辑器任何改动：写回状态 → 重渲染标记 → 校验 → 防抖保存 */
@@ -3894,11 +4423,56 @@ function syncBatchLabels(){
   const ss = $('#slotStat');
   if (ss) ss.textContent = `${b.slots.length} 组`;
 
+  renderSlotSummary();
+
   renderComboPreview(total);
   renderFrozenInfo();
 
   // 终端运行区随批次/目录变化刷新「继续/开新」状态
   cliDetect();
+}
+
+/** 批量面板上的占位符摘要（编辑器已移入弹窗，这里只给一览）。
+ *  每个占位符一个小标签：名字 + 条数 +（可选时）概率角标；
+ *  空数组或未被模板引用时标红，让人不用打开弹窗就知道哪里有问题。 */
+function renderSlotSummary(){
+  const box = $('#slotSummary');
+  if (!box) return;
+  const b = S.m.batch;
+  box.innerHTML = '';
+
+  if (!b.slots.length){
+    box.textContent = '还没有占位符。点「＋ 新增」或在模板里写 {{名称}} 后回来添加。';
+    return;
+  }
+
+  const usedN = b.slots.filter(s => slotIsUsed(s.name)).length;
+  const head = document.createElement('div');
+  head.textContent = `共 ${b.slots.length} 个占位符 · ${usedN} 个被模板引用`;
+  box.appendChild(head);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'slotsum';
+  b.slots.forEach((s, i) => {
+    const n = (s.values || []).length;
+    const used = slotIsUsed(s.name);
+    const p = slotProb(b.slots, s.name);
+    const tg = document.createElement('span');
+    tg.className = 'tg' + ((used && n) ? '' : ' miss');
+    const nm = document.createElement('b');
+    nm.textContent = s.name || '(未命名)';
+    tg.appendChild(nm);
+    const meta = document.createElement('span');
+    meta.className = 'n';
+    meta.textContent = `${n} 条` + (p < 1 ? ` · ${Math.round(p * 100)}%` : '');
+    tg.appendChild(meta);
+    tg.title = used
+      ? (n ? `点击编辑「${s.name}」的取值` : `「${s.name}」的数组是空的`)
+      : `模板里没有引用「${s.name}」`;
+    tg.onclick = () => { slotDlgIndex = i; openSlotDlg(); };
+    wrap.appendChild(tg);
+  });
+  box.appendChild(wrap);
 }
 
 /** 预览 = 本批将要生成的真实组合列表（不是装饰）。
@@ -4497,12 +5071,28 @@ async function runBatchLoop(startAt){
       const used = new Set(S.m.batch.slots.map(s => (s.name || '').trim()));
       while (used.has(name)) name = base + (++n);
       S.m.batch.slots.push({ name, values: [] });
+      slotDlgIndex = S.m.batch.slots.length - 1;   // 新加的自动选中
       renderSlotEditor(); renderTplTags(); syncBatchLabels(); validateBatch();
       cfgSaveDebounced();
-      const el = $$('#slotList .slot').pop();
-      el?.querySelector('[data-slotname]')?.focus();
+      // 面板上的「＋ 新增」直接进弹窗编辑新项；弹窗里的「＋ 新增」就地刷新
+      if ($('#slotDlg') && $('#slotDlg').classList.contains('show')) renderSlotDlg();
+      else openSlotDlg();
+      setTimeout(() => {
+        const nm = $('#slotDlgName');
+        if (nm){ nm.focus(); nm.select(); }
+      }, 0);
     };
   }
+
+  /* ── 占位符弹窗 ── */
+  const so = $('#slotOpen');
+  if (so) so.onclick = openSlotDlg;
+  const sdx = $('#slotDlgClose');
+  if (sdx) sdx.onclick = closeSlotDlg;
+  const sdd = $('#slotDlgDone');
+  if (sdd) sdd.onclick = closeSlotDlg;
+  const sda = $('#slotDlgAdd');
+  if (sda) sda.onclick = () => $('#slotAdd')?.click();
 
   const ins = $('#tplInsert');
   if (ins){
@@ -4637,8 +5227,12 @@ $('#pdPath').addEventListener('keydown', e => {
 });
 $('#pathDlg').addEventListener('click', e => { if (e.target.id === 'pathDlg') closePathDlg(); });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && $('#pathDlg').classList.contains('show')) closePathDlg();
+  if (e.key !== 'Escape') return;
+  // 弹窗层：先关最上层那个（占位符弹窗盖在路径弹窗之上）
+  if ($('#slotDlg').classList.contains('show')){ closeSlotDlg(); return; }
+  if ($('#pathDlg').classList.contains('show')) closePathDlg();
 });
+$('#slotDlg').addEventListener('click', e => { if (e.target.id === 'slotDlg') closeSlotDlg(); });
 
 /* ── 保存目录按钮 ── */
 $('#btnDir').onclick = pickDir;
