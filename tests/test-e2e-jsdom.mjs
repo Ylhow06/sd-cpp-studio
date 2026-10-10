@@ -167,14 +167,20 @@ async function makePage(){
 const cfgPath = TEST_CFG;
 function readDiskCfg(){ return JSON.parse(fs.readFileSync(cfgPath, 'utf8')); }
 
-/* 从页面源码里解析出厂定义的组合数，避免把数字写死 */
-const BATCH_FACTORY_COMBO = (() => {
+/* 从页面源码里解析出厂示例的组合数与占位符数，避免把数字写死
+   （示例内容换过一次，写死的断言会变成假失败） */
+const BATCH_FACTORY_INFO = (() => {
   const html = fs.readFileSync(UI_HTML, 'utf8');
   const js = html.slice(html.indexOf('<script>') + 8, html.lastIndexOf('</script>'));
   const seg = js.slice(js.indexOf('const BATCH_FACTORY'), js.indexOf('/* ══════════════ 批量生图 · 占位符引擎'));
   const m = new Function(`${seg}; return BATCH_FACTORY;`)();
-  return m.slots.reduce((a, s) => a * s.values.length, 1);
+  return {
+    combo: m.slots.reduce((a, s) => a * s.values.length, 1),
+    slotN: m.slots.length,
+    names: m.slots.map(s => s.name)
+  };
 })();
+const BATCH_FACTORY_COMBO = BATCH_FACTORY_INFO.combo;
 
 async function main(){
   await sleep(900);
@@ -197,8 +203,9 @@ async function main(){
     log('  ' + JSON.stringify(r));
     r.mode === 'txt2img' ? ok('默认模式 = txt2img') : bad('默认模式异常', r.mode);
     r.hasBatch ? ok('S.m.batch 已初始化') : bad('S.m.batch 缺失');
-    r.tplLen > 100 ? ok(`出厂模板已载入（${r.tplLen} 字）`) : bad('模板未载入', r.tplLen);
-    r.slotN === 3 ? ok('出厂 3 组数组已载入') : bad('数组数不对', r.slotN);
+    r.tplLen > 50 ? ok(`出厂示例已载入（${r.tplLen} 字）`) : bad('模板未载入', r.tplLen);
+    r.slotN === BATCH_FACTORY_INFO.slotN
+      ? ok(`出厂 ${BATCH_FACTORY_INFO.slotN} 组数组已载入`) : bad('数组数不对', r.slotN);
     r.cfgOk ? ok('配置服务已连上') : bad('配置服务未连上');
     r.caps ? ok(`已连上 sd-server（${r.model}）`) : bad('未连上 sd-server');
     r.goDisabled === false ? ok('生成按钮已启用') : bad('生成按钮仍禁用');
@@ -227,12 +234,14 @@ async function main(){
     r.mode === 'batch' ? ok('模式已切换') : bad('模式切换失败');
     r.paneOn ? ok('batch pane 已显示') : bad('batch pane 未显示');
     r.tabOn ? ok('batch tab 高亮') : bad('batch tab 未高亮');
-    r.tplInDom > 100 ? ok('模板已填入 textarea') : bad('textarea 未填', r.tplInDom);
+    r.tplInDom > 50 ? ok('模板已填入 textarea') : bad('textarea 未填', r.tplInDom);
     String(r.comboNum) === String(BATCH_FACTORY_COMBO)
       ? ok(`组合数显示 ${BATCH_FACTORY_COMBO}`) : bad('组合数不对', r.comboNum);
-    r.errShown === false ? ok('出厂模板无报错（关键：不能一打开就红）') : bad('出厂模板竟然报错');
-    r.tags === 3 ? ok('3 个占位符标记已渲染') : bad('标记数不对', r.tags);
-    r.slots === 3 ? ok('3 个数组编辑器已渲染') : bad('编辑器数不对', r.slots);
+    r.errShown === false ? ok('出厂示例无报错（关键：不能一打开就红）') : bad('出厂示例竟然报错');
+    r.tags === BATCH_FACTORY_INFO.slotN
+      ? ok(`${BATCH_FACTORY_INFO.slotN} 个占位符标记已渲染`) : bad('标记数不对', r.tags);
+    r.slots === BATCH_FACTORY_INFO.slotN
+      ? ok(`${BATCH_FACTORY_INFO.slotN} 个数组编辑器已渲染`) : bad('编辑器数不对', r.slots);
     r.countVal === '8' ? ok('张数默认 8') : bad('张数默认值不对', r.countVal);
     r.skipChecked === true ? ok('跳过重复默认勾选') : bad('跳过重复未勾选');
     r.frozenInfo.includes('768') ? ok('参数来源提示显示文生图尺寸') : bad('参数提示不对', r.frozenInfo);
@@ -417,12 +426,15 @@ async function main(){
     r.cfgOk ? ok('刷新后配置服务仍连上') : bad('配置服务断开');
   }
 
-  log('\n=== H. 恢复默认 ===');
+  log('\n=== H. 恢复示例 ===');
   {
-    // 注意：G 段刚把配置改成「甲/乙」两个数组，这里点「恢复默认」应当
-    // 回到出厂 3 组（服装 6 / 场景 6 / 动作 8 = 288 组合）。
-    // 用出厂定义算出期望值，避免把数字写死在对不上时难以定位。
+    // 注意：G 段刚把配置改成「甲/乙」两个数组，这里点「恢复示例」应当
+    // 回到出厂示例（模板 + 全部数组 + 张数 + 跳过重复）。
+    // 期望值全部从出厂定义里算，改示例内容时这里自动跟着走。
     const expectCombo = BATCH_FACTORY_COMBO;
+    const expectSlotN = BATCH_FACTORY_INFO.slotN;
+    const names = BATCH_FACTORY_INFO.names;
+    const lastName = names[names.length - 1];
     const r = await ev(`
       window.confirm = () => true;
       switchMode('batch');
@@ -431,23 +443,47 @@ async function main(){
       await new Promise(r=>setTimeout(r,900));   // 等 loadBatchPane + planSave 走完
       return {
         slots: S.m.batch.slots.length,
-        actionCount: (S.m.batch.slots.find(s=>s.name==='动作')||{values:[]}).values.length,
-        tplHas3: ['服装','场景','动作'].every(n=>S.m.batch.template.includes('{{'+n+'}}')),
+        lastCount: (S.m.batch.slots.find(s=>s.name===${JSON.stringify(lastName)})||{values:[]}).values.length,
+        tplHasAll: ${JSON.stringify(names)}.every(n=>S.m.batch.template.includes('{{'+n+'}}')),
         comboNum: document.querySelector('#comboNum').textContent,
         cfgOk: S.b.cfgOk
       };`);
-    log('  ' + JSON.stringify(r) + `  （期望组合数 ${expectCombo}）`);
-    r.slots === 3 ? ok('恢复为 3 组数组') : bad('数组数不对', r.slots);
-    r.actionCount === 8 ? ok('动作数组恢复为 8 条') : bad('动作条数不对', r.actionCount);
-    r.tplHas3 ? ok('模板恢复为出厂内容') : bad('模板未恢复');
+    log('  ' + JSON.stringify(r) + `  （期望组合数 ${expectCombo} / ${expectSlotN} 组）`);
+    r.slots === expectSlotN ? ok(`恢复为 ${expectSlotN} 组数组`) : bad('数组数不对', r.slots);
+    r.lastCount === 8 ? ok(`「${lastName}」数组恢复为 8 条`) : bad('数组条数不对', r.lastCount);
+    r.tplHasAll ? ok('模板恢复为出厂示例内容') : bad('模板未恢复');
     String(r.comboNum) === String(expectCombo)
       ? ok(`组合数回到 ${expectCombo}`) : bad('组合数不对', r.comboNum);
 
     await sleep(400);
     const disk = readDiskCfg();
-    disk.batch.slots.length === 3 ? ok('恢复默认已落盘') : bad('恢复默认未落盘');
-    disk.batch.slots.find(s => s.name === '动作')?.values.length === 8
-      ? ok('磁盘上动作数组为 8 条') : bad('磁盘动作条数不对');
+    disk.batch.slots.length === expectSlotN ? ok('恢复示例已落盘') : bad('恢复示例未落盘');
+    disk.batch.slots.find(s => s.name === lastName)?.values.length === 8
+      ? ok(`磁盘上「${lastName}」数组为 8 条`) : bad('磁盘数组条数不对');
+  }
+
+  log('\n=== H2. 恢复示例的确认框文案 ===');
+  {
+    /* ★ 按钮从「恢复默认」改名成「恢复示例」，语义变了：
+       它恢复的是**教学示例**，不是「推荐配置」。
+       确认框必须说清楚这一点，否则用户会以为点了会得到一套好用的模板，
+       而实际上拿到的是一份短小的演示内容 —— 那才是真正的误导。
+       这里拦截 confirm 参数做断言（不真的点确认）。 */
+    const r = await ev(`
+      let seen = null;
+      const orig = window.confirm;
+      window.confirm = (m) => { seen = String(m); return false; };   // 取消，不动状态
+      document.querySelector('#tplReset').click();
+      await new Promise(r=>setTimeout(r,120));
+      window.confirm = orig;
+      return { seen, before: S.m.batch.template };
+    `);
+    log('  文案: ' + JSON.stringify(r.seen).slice(0, 160));
+    (r.seen || '').includes('恢复示例') ? ok('确认框标题是「恢复示例」') : bad('标题没改', r.seen);
+    (r.seen || '').includes('教学示例') ? ok('★ 说明了这只是教学示例') : bad('未说明是示例');
+    (r.seen || '').includes('我的模板') ? ok('★ 说明了已存模板不受影响') : bad('未说明模板库不受影响');
+    (r.seen || '').includes(String(BATCH_FACTORY_COMBO))
+      ? ok(`确认框给出了实际组合数 ${BATCH_FACTORY_COMBO}`) : bad('未给出组合数');
   }
 
   log('\n=== I. 计划续跑（1 档：只续计划）===');
@@ -518,13 +554,20 @@ async function main(){
         if (String(url).includes(':${CFG_PORT}')) return Promise.reject(new Error('ECONNREFUSED'));
         return orig.call(this, url, ...rest);
       };
+      const tplBefore = S.m.batch.template;
+      const slotsBefore = S.m.batch.slots.length;
       const c = await cfgLoad();
       const out = {
         cfgLoadNull: c === null,
         cfgOk: S.b.cfgOk,
         barClass: document.querySelector('#cfgBar').className,
         capsOk: !!S.caps,
-        tplStillThere: S.m.batch.template.length > 100
+        /* ★ 不写死长度阈值。降级路径只在该填默认时才填，
+           有内容就必须原样保留 —— 断言「内容没被清空」比断言长度准确。 */
+        tplLen: S.m.batch.template.length,
+        tplKept: S.m.batch.template === tplBefore,
+        tplHasSlot: S.m.batch.template.includes('{{'),
+        slotKept: S.m.batch.slots.length === slotsBefore
       };
       window.fetch = orig;
       return out;`);
@@ -533,7 +576,9 @@ async function main(){
     r.cfgOk === false ? ok('降级标志已置') : bad('降级标志未置');
     r.barClass.includes('err') ? ok('状态条显示错误') : bad('状态条未提示', r.barClass);
     r.capsOk ? ok('主功能（sd-server 连接）不受影响') : bad('主功能被影响');
-    r.tplStillThere ? ok('降级后模板仍可用（回退出厂默认）') : bad('模板丢失');
+    r.tplKept ? ok(`降级后模板原样保留（${r.tplLen} 字，未被清空）`) : bad('模板被改动/清空');
+    r.tplHasSlot ? ok('降级后模板仍是可用的占位符模板') : bad('模板内容异常');
+    r.slotKept ? ok('降级后占位符数组也保留') : bad('数组丢失');
   }
 
   log('\n=== L. 参数继承 + 冻结快照 ===');

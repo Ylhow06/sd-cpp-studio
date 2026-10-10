@@ -29,10 +29,10 @@ const engine = js.slice(from, to);
 
 const mod = new Function(`
 ${engine}
-return { BATCH_FACTORY, scanSlots, validateTemplate, slotValues, comboCount, renderPrompt, pickCombo };
+return { BATCH_FACTORY, scanSlots, validateTemplate, warnTemplate, slotValues, comboCount, renderPrompt, pickCombo };
 `)();
 
-const { BATCH_FACTORY, scanSlots, validateTemplate, slotValues, comboCount, renderPrompt, pickCombo } = mod;
+const { BATCH_FACTORY, scanSlots, validateTemplate, warnTemplate, slotValues, comboCount, renderPrompt, pickCombo } = mod;
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra){
@@ -40,15 +40,29 @@ function ok(name, cond, extra){
   else { fail++; console.log('  ✗ ' + name + (extra ? '  → ' + extra : '')); }
 }
 
-console.log('\n=== 1. 出厂默认自洽性（关键：不能一打开就报错）===');
+console.log('\n=== 1. 出厂示例自洽性（关键：不能一打开就报错）===');
 {
   const v = validateTemplate(BATCH_FACTORY.template, BATCH_FACTORY.slots);
   ok('出厂模板零错误', v.errors.length === 0, JSON.stringify(v.errors));
-  ok('组合数 = 6×6×8 = 288', comboCount(BATCH_FACTORY.slots, BATCH_FACTORY.template) === 288,
+  /* ★ 组合数不写死：从示例定义里算，改示例内容时这里自动跟着走。
+     写死数字会在「换示例」时变成假失败，白排查一轮。 */
+  const expectCombo = BATCH_FACTORY.slots.reduce((a, s) => a * s.values.length, 1);
+  ok(`组合数 = ${expectCombo}`, comboCount(BATCH_FACTORY.slots, BATCH_FACTORY.template) === expectCombo,
      '实际 ' + comboCount(BATCH_FACTORY.slots, BATCH_FACTORY.template));
   const { found } = scanSlots(BATCH_FACTORY.template);
   const names = [...new Set(found.map(f => f.name.trim()))];
-  ok('识别出 3 个占位符', names.length === 3, names.join(','));
+  ok(`识别出 ${BATCH_FACTORY.slots.length} 个占位符`, names.length === BATCH_FACTORY.slots.length, names.join(','));
+
+  /* ★ 示例是「教学示例」，不是推荐配置 —— 必须全部必选。
+     一旦示例里带了 0<p<1 的槽位，用户一打开批量面板就会看到
+     「跳过重复被禁用」的黄字，第一印象是「这东西坏了」。 */
+  ok('示例里没有可选槽位（全部必选，打开即干净可跑）',
+     BATCH_FACTORY.slots.every(s => !(Number(s.p) > 0 && Number(s.p) < 1)),
+     JSON.stringify(BATCH_FACTORY.slots.map(s => s.p)));
+  ok('示例模板不触发「裸可选占位符」警告',
+     warnTemplate(BATCH_FACTORY.template, BATCH_FACTORY.slots).warns.length === 0);
+  ok('示例里每个占位符都有非空数组',
+     BATCH_FACTORY.slots.every(s => (s.values || []).length > 0));
 }
 
 console.log('\n=== 2. 扫描与未闭合检测 ===');
@@ -170,7 +184,46 @@ console.log('\n=== 6. 跳过重复组合 ===');
   ok('216 空间中连抽 60 次全不重复', allUniq && used3.length === 60, '抽到 ' + used3.length);
 }
 
-console.log('\n=== 7. 边界 ===');
+console.log('\n=== 7. 警告通道（裸可选占位符，不拦生成）===');
+{
+  const opt = [
+    { name: '眼镜', values: ['银色细框圆形眼镜'], p: 0.2 },
+    { name: '鞋子', values: ['白色运动鞋'] }
+  ];
+  // 包了条件块 → 无警告
+  const w1 = warnTemplate('{{#眼镜}}眼镜：{{眼镜}}；{{/眼镜}}鞋子：{{鞋子}}。', opt);
+  ok('条件块包住可选占位符 → 无警告', w1.warns.length === 0, JSON.stringify(w1.warns));
+
+  // 裸占位符 → 有警告
+  const w2 = warnTemplate('眼镜：{{眼镜}}。鞋子：{{鞋子}}。', opt);
+  ok('裸可选占位符 → 有警告', w2.warns.length === 1, JSON.stringify(w2.warns));
+  ok('警告里点出是哪个占位符', w2.warns[0]?.name === '眼镜', w2.warns[0]?.name);
+  ok('警告文案给出可照抄的写法', /{{#眼镜}}/.test(w2.warns[0]?.msg || ''), w2.warns[0]?.msg);
+
+  // 必选占位符裸写 → 不该警告（它永远出现，不存在空标签问题）
+  const w3 = warnTemplate('鞋子：{{鞋子}}。', opt);
+  ok('必选占位符裸写不警告', w3.warns.length === 0, JSON.stringify(w3.warns));
+
+  // 同一占位符既有裸写又有块内写 → 仍然警告（那处裸写确实会出问题）
+  const w4 = warnTemplate('{{#眼镜}}眼镜：{{眼镜}}。{{/眼镜}}还有{{眼镜}}。', opt);
+  ok('同一占位符有一处裸写就警告', w4.warns.length === 1, JSON.stringify(w4.warns));
+
+  // 同一占位符多处裸写 → 只报一条（别把同一件事刷屏）
+  const w5 = warnTemplate('{{眼镜}}和{{眼镜}}和{{眼镜}}', opt);
+  ok('同一占位符多处裸写只报一条', w5.warns.length === 1, String(w5.warns.length));
+
+  // 警告是「警告」不是「错误」：validateTemplate 必须零错误
+  const v = validateTemplate('眼镜：{{眼镜}}。鞋子：{{鞋子}}。', opt);
+  ok('★ 裸可选占位符不算错误（不会拦生成）', v.errors.length === 0, JSON.stringify(v.errors));
+
+  // 没有可选槽位时永远不警告
+  const w6 = warnTemplate('{{眼镜}}{{鞋子}}', [
+    { name: '眼镜', values: ['a'] }, { name: '鞋子', values: ['b'] }
+  ]);
+  ok('无概率槽位时不警告', w6.warns.length === 0);
+}
+
+console.log('\n=== 8. 边界 ===');
 {
   ok('无占位符时 pickCombo 返回 null', pickCombo([], '纯文本', [], false) === null);
   ok('数组为空时返回 null', pickCombo([{name:'x',values:[]}], '{{x}}', [], false) === null);

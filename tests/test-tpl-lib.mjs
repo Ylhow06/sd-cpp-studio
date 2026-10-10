@@ -9,7 +9,7 @@
      E. 重命名 / 删除 / 无数量上限
      F. 落盘：模板写进独立文件（不再进 config.json）
      G. 刷新（cfgLoad）后从 /templates 恢复模板库
-     H. 「恢复默认模板」也应可撤回
+     H. 「恢复示例」也应可撤回
      I. 边界：空模板不允许存、名字为空
    ══════════════════════════════════════════════════════════════ */
 import fs from 'node:fs';
@@ -373,19 +373,23 @@ console.log('\n=== E. 重命名 / 删除 / 无上限 ===');
   confirmAnswer = true;
 }
 
-console.log('\n=== H. 「恢复默认模板」也可撤回 ===');
+console.log('\n=== H. 「恢复示例」也可撤回 ===');
 {
-  setPane('要被默认覆盖的内容', [{ name: 'Q', values: ['1'] }], 7, false);
+  setPane('要被示例覆盖的内容', [{ name: 'Q', values: ['1'] }], 7, false);
   confirmAnswer = true;
   await w.eval(`$('#tplReset').onclick()`);
   await tick();
-  chk(S().template !== '要被默认覆盖的内容', '★ 已恢复为出厂默认');
-  chk(S().template.includes('全身竖构图') || S().template.length > 50, '内容确为出厂模板');
-  chk(BK() !== null && BK().template === '要被默认覆盖的内容', '★ 恢复默认也做了备份');
+  chk(S().template !== '要被示例覆盖的内容', '★ 已恢复为出厂示例');
+  /* ★ 不写死示例正文（它换过一次）。改成与页面里的 BATCH_FACTORY 比对，
+     这样以后调整示例内容不会让这条断言变成假失败。 */
+  const factoryTpl = w.eval('BATCH_FACTORY.template');
+  chk(S().template === factoryTpl, '内容与 BATCH_FACTORY 完全一致');
+  chk(S().slots.length === w.eval('BATCH_FACTORY.slots.length'), '数组也回到示例');
+  chk(BK() !== null && BK().template === '要被示例覆盖的内容', '★ 恢复示例也做了备份');
 
   await w.eval('undoTemplate()');
   await tick();
-  chk(S().template === '要被默认覆盖的内容', '★ 可撤回默认恢复');
+  chk(S().template === '要被示例覆盖的内容', '★ 可撤回示例恢复');
 }
 
 console.log('\n=== I. 边界 ===');

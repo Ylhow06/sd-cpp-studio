@@ -98,7 +98,7 @@ else {
 /* ── 6. 批量面板关键控件是否存在 ── */
 console.log('\n--- 批量面板必需控件 ---');
 const needIds = ['cfgBar','cfgTxt','cfgPath','planCard','planTitle','planDesc','planResume',
-                 'planAbandon','tplBox','tplErr','tplTags','tplStat','tplInsert','tplReset',
+                 'planAbandon','tplBox','tplErr','tplWarn','tplHelp','tplTags','tplStat','tplInsert','tplReset',
                  'slotList','slotAdd','slotStat','slotSummary','comboLine','comboNum','comboHint',
                  'countWarn','skipDup','comboPrev','prevStat','frozenInfo',
                  // 我的模板（用户模板库）
@@ -130,7 +130,7 @@ if (!batchPaneMatch){
 
 /* ── 8. 函数定义检查 ── */
 console.log('\n--- 批量模块函数是否都已定义 ---');
-const needFns = ['scanSlots','validateTemplate','slotValues','comboCount','renderPrompt',
+const needFns = ['scanSlots','validateTemplate','warnTemplate','slotValues','comboCount','renderPrompt',
                  'pickCombo','buildCombo','cfgLoad','cfgSaveNow','cfgSaveDebounced','planSave',
                  'templateHash','loadBatchPane','saveBatchPane','renderSlotEditor','onSlotEdit',
                  'slotIsUsed','renderTplTags','validateBatch','escapeHtml','syncBatchLabels',
@@ -204,7 +204,10 @@ else ok('无 localStorage 覆盖，默认值每次打开都生效');
 
 /* ── 10. 标签闭合粗查 ── */
 console.log('\n--- 标签闭合粗查 ---');
-for (const tag of ['div','section','aside','main','header','textarea','button']){
+for (const tag of ['div','section','aside','main','header','textarea','button',
+                   // ★ 「模板写法速查」用的标签：details/summary/table 少一个
+                   //   闭合就会让后面整个面板结构错位，必须一起查
+                   'details','summary','table','tr','td','code']){
   const open = (markup.match(new RegExp(`<${tag}[\\s>]`, 'g')) || []).length;
   const close = (markup.match(new RegExp(`</${tag}>`, 'g')) || []).length;
   if (tag === 'button' || tag === 'textarea'){

@@ -355,6 +355,16 @@ button.b.sm{padding:5px 8px;font-size:12px}
 #tplErr .li:first-child{margin-top:0}
 #tplErr .pos{color:var(--fg3);font-variant-numeric:tabular-nums}
 
+/* 模板警告（不拦生成）：目前只有「可选占位符没包条件块」这一种。
+   用琥珀色与红色报错区分 —— 报错会拦住生成，警告只是提醒。 */
+#tplWarn{
+  display:none;margin-top:7px;padding:7px 10px;border-radius:7px;font-size:11.5px;line-height:1.6;
+  background:rgba(210,153,34,.09);border:1px solid rgba(210,153,34,.35);color:#e3c07a;
+}
+#tplWarn.show{display:block}
+#tplWarn .li{margin-top:3px}
+#tplWarn .li:first-child{margin-top:0}
+
 /* 模板里识别出的占位符标记 */
 #tplTags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
 #tplTags .tg{
@@ -365,6 +375,43 @@ button.b.sm{padding:5px 8px;font-size:12px}
 #tplTags .tg.miss{border-color:rgba(248,81,73,.5);color:#ffb3ae}
 #tplTags .tg b{color:var(--acc2);font-weight:600}
 #tplTags .tg .n{color:var(--fg3);margin-left:4px;font-variant-numeric:tabular-nums}
+
+/* ── 模板写法速查（折叠）──
+   条件块 {{#名}}…{{/名}} 是概率功能配套的语法，之前只写在源码注释与文档里，
+   UI 上没有任何入口，等于「功能存在但没人知道」。这里做成默认收起的速查表，
+   不占面板高度，需要时展开。 */
+#tplHelp{
+  margin-top:9px;border:1px solid var(--line);border-radius:7px;
+  background:var(--bg);overflow:hidden;
+}
+#tplHelp>summary{
+  cursor:pointer;padding:7px 10px;font-size:11.5px;color:var(--fg2);
+  user-select:none;list-style:none;display:flex;align-items:center;gap:6px;
+}
+#tplHelp>summary::-webkit-details-marker{display:none}
+#tplHelp>summary::before{content:'▸';color:var(--fg3);transition:.15s;font-size:10px}
+#tplHelp[open]>summary::before{transform:rotate(90deg)}
+#tplHelp>summary:hover{color:var(--fg)}
+#tplHelp>summary .k{
+  margin-left:auto;font-size:10.5px;color:var(--fg3);
+  border:1px solid var(--line);border-radius:4px;padding:0 5px;
+}
+#tplHelp .hb{padding:2px 10px 10px;font-size:11.5px;line-height:1.75;color:var(--fg2)}
+#tplHelp .hb table{width:100%;border-collapse:collapse}
+#tplHelp .hb td{padding:4px 0;vertical-align:top;border-top:1px solid var(--line)}
+#tplHelp .hb tr:first-child td{border-top:0}
+#tplHelp .hb td:first-child{width:104px;padding-right:8px;white-space:nowrap}
+#tplHelp .hb code{
+  font-family:"Consolas","Microsoft YaHei UI",monospace;font-size:11px;
+  color:var(--acc2);background:var(--bg3);border-radius:4px;padding:1px 5px;
+  white-space:nowrap;
+}
+#tplHelp .hb .ex{
+  display:block;margin-top:3px;font-family:"Consolas","Microsoft YaHei UI",monospace;
+  font-size:11px;color:var(--fg3);white-space:pre-wrap;word-break:break-all;
+}
+#tplHelp .hb b{color:var(--fg1);font-weight:600}
+#tplHelp .hb .warnc{color:#e3c07a}
 
 /* 占位符数组编辑器 */
 .slot{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:9px;background:var(--bg)}
@@ -878,14 +925,64 @@ button.b.sm{padding:5px 8px;font-size:12px}
             <textarea data-f="template" placeholder="例：一位女孩，穿{{服装}}，在{{场景}}，{{动作}}"></textarea>
           </div>
           <div id="tplErr"></div>
+          <div id="tplWarn"></div>
           <div id="tplTags"></div>
+
+          <!-- 模板写法速查：默认收起，不占面板高度 -->
+          <details id="tplHelp">
+            <summary>模板写法速查 <span class="k">点开</span></summary>
+            <div class="hb">
+              <table>
+                <tr>
+                  <td><code>{{名称}}</code></td>
+                  <td>取值占位符。每张图从「随机取值数组」里抽一条替换。
+                    <span class="ex">服装：{{服装}}。 → 服装：黑色皮夹克内搭白T恤…</span>
+                    <span class="ex">同一个占位符在一张图里只抽一次，出现两次也是同一个值。</span></td>
+                </tr>
+                <tr>
+                  <td><code>{{#名称}}<br>…<br>{{/名称}}</code></td>
+                  <td>条件块。<b>该占位符本次不出现时，整块连文字一起删掉。</b>
+                    只有配了概率（可选）的占位符才需要。
+                    <span class="ex">例：{{#眼镜}}眼镜：{{眼镜}}；{{/眼镜}}鞋子：{{鞋子}}。</span>
+                    <span class="ex">眼镜缺席 → 「眼镜：银色细框圆形眼镜；鞋子：白色运动鞋。」整段眼镜部分消失</span>
+                    <span class="ex">眼镜出现 → 「眼镜：银色细框圆形眼镜；鞋子：白色运动鞋。」</span>
+                    <span class="warnc">注意「眼镜：」这个标签必须写在块<b>里面</b>。
+                    写在块外面的话，缺席时会剩下一句光秃秃的「眼镜：」污染提示词。</span></td>
+                </tr>
+              </table>
+
+              <div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px">
+                <b>最小可跑示例</b> —— 直接抄进上面的输入框：
+                <span class="ex">一位女孩，穿{{服装}}，在{{场景}}，{{动作}}。</span>
+                然后在「随机取值数组」里建 服装 / 场景 / 动作 三个占位符，
+                每个占位符一行一条取值。
+              </div>
+
+              <div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px">
+                <b>可选占位符（有时戴眼镜、鞋子必穿）</b>：
+                <span class="ex">一位女孩，{{#眼镜}}戴{{眼镜}}，{{/眼镜}}穿{{鞋子}}。</span>
+                建「眼镜」时把概率设成 20%，「鞋子」保持 100%。
+                <span class="warnc">没包条件块的裸占位符在缺席时会留下「眼镜：」这样的空标签，
+                所以面板上会给你一条黄色提醒（不影响生成）。</span>
+              </div>
+
+              <div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px">
+                <b>规则</b>
+                <span class="ex">· 名称可用中文，<b>不能含空格或花括号</b>
+· {{ 和 }} 必须成对，写成 {{服装 会报错
+· 模板里用到的每个占位符都必须有对应的非空数组，否则会被拦下
+· 定义了数组但模板里没用到 —— 只是提示「未用」，不影响生成</span>
+              </div>
+            </div>
+          </details>
+
           <div class="hint">
             占位符写作 <b style="color:var(--fg2)">{{名称}}</b>，可用中文、不可含空格。
             同一个占位符在一张图里只会取一个值。
           </div>
           <div class="row" style="margin-top:9px">
             <button class="b sm" id="tplInsert">＋ 插入占位符</button>
-            <button class="b sm" id="tplReset">恢复默认模板</button>
+            <button class="b sm" id="tplReset">恢复示例</button>
           </div>
         </div>
 
@@ -1252,32 +1349,24 @@ const RATIOS = [
 /* 模式显示名（查表，避免到处写三元链） */
 const MODE_NAME = { txt2img: '文生图', img2img: '图生图', inpaint: '局部重绘', batch: '批量' };
 
-/* ══════════════ 批量生图 · 出厂默认 ══════════════
-   注意：默认模板里的占位符必须都有非空数组，否则按「找不到数组就硬拦」
-   的规则，用户第一次打开批量面板就会看到红色报错。
-   这份内容与服务端 serve-config.mjs 里的 FACTORY 保持一致。
+/* ══════════════ 批量生图 · 出厂示例 ══════════════
+   ★ 这是「示例」，不是「推荐配置」。
+     目的是让人第一次打开批量面板就能看懂占位符怎么用：
+       · 模板短，一眼看完，不被大段身份描述淹没
+       · 三个占位符各是一眼能懂的维度（穿什么 / 在哪 / 什么姿势）
+       · 全部必选 → 打开时没有红字、没有置灰控件，是干净的可跑状态
 
-   ★ 构图原则（实测总结，两轮迭代得来）：
-     身份块很长，会把模型权重压在脸上，默认出图会变成「胸部以上半身」，
-     导致服装和腰部以下的姿势全部体现不出来。
-     解决办法是【构图前置 + 末尾重复】：
-       1) 把「全身构图」写在模板最开头（开头权重最高）
-       2) 结尾再用一句「全身站姿，完整展示服装」加固
-       3) 身份块保持完整（脸的一致性靠它），但不再让它独占权重
-     实测失败例（半身时代）：举起奶茶（杯子裁在画面边缘）、低头挑选水果
-     （水果在底部被裁）、撑伞回头（伞面出画）、靠着栏杆（栏杆不在画面内）。
-     现在的姿势数组一律是【静态站姿】——动态动作（走、蹲、跑）在这套
-     写实风格下容易崩肢体，静态站姿稳定且能展示整套服装。 */
+     完整的写法（含条件块、概率）看面板上的「模板写法速查」，
+     那里有可以直接抄的例子。真正要长期用的模板请存进「我的模板」。
+
+   注意：示例里的占位符必须都有非空数组，否则按「找不到数组就硬拦」的规则，
+   用户第一次打开批量面板就会看到红色报错。
+   这份内容与服务端 serve-config.mjs 里的 FACTORY 保持一致。 */
 const BATCH_FACTORY = {
   template:
-    '全身竖构图，一位20岁中国女孩的全身生活快照，从头到脚完整入镜，' +
-    '人物占画面主体，服装完整清晰可见，全身穿搭都拍进画面。\n' +
-    '固定身份特征，每一张都必须完全一致：左眼下方有一颗小泪痣，' +
-    '细长的单眼皮杏眼、眼尾微微下垂，眉毛细而平直，鼻子小巧挺直、鼻头圆润，嘴唇小巧饱满呈' +
-    '自然粉色，圆润柔和的鹅蛋脸、下巴略短，齐刘海及肩黑发，白皙偏暖的皮肤带自然肌理，身材纤细。\n' +
+    '一位20岁中国女孩的全身生活照，从头到脚完整入镜，人物占画面主体。\n' +
     '服装：{{服装}}。场景：{{场景}}。姿势：{{动作}}。\n' +
-    '全身站姿，完整展示服装与身形，双脚和鞋子都在画面内。' +
-    '真实抓拍风格，纪实生活摄影，可用自然光，手机拍摄质感，写实。',
+    '真实抓拍风格，纪实生活摄影，自然光，手机拍摄质感，写实。',
   slots: [
     { name: '服装', values: [
       '黑色皮夹克内搭白T恤配黑色长裤和短靴',
@@ -1501,6 +1590,34 @@ function validateTemplate(tpl, slots){
   const unused = slots.map(s => (s.name || '').trim()).filter(n => n && !usedNames.has(n));
 
   return { errors, unused, found, unclosed, blocks };
+}
+
+/** 校验模板 + 数组，返回**警告**列表（不拦生成，只提醒）。
+ *
+ *  目前只有一种：可选占位符（0<p<1）没有被条件块包住。
+ *  这时它缺席会被渲染成空串，模板里若写的是「眼镜：{{眼镜}}。」，
+ *  结果就留下「眼镜：。」这种空标签污染提示词。
+ *
+ *  ★ 为什么做成警告而不是错误：这不是语法错误，模板完全能跑；
+ *    而且「缺席时留个空标签」在某些排版下是可以接受的。
+ *    硬拦会挡住本来能用的模板，比不拦更糟。
+ *  ★ 与 errors 分开返回：UI 用琥珀色显示，视觉上与红色报错区分。 */
+function warnTemplate(tpl, slots){
+  const warns = [];
+  const { found } = scanSlots(tpl || '');
+  const names = [...new Set(found.map(f => f.name.trim()).filter(Boolean))];
+  for (const name of names){
+    if (slotProb(slots, name) >= 1) continue;          // 必选，不涉及缺席
+    const bare = found.some(f => f.name.trim() === name && !f.blocks.length);
+    if (bare){
+      warns.push({
+        kind: 'bareprob', name,
+        msg: `「${name}」设了出现概率，但模板里有一处没有用 {{#${name}}}…{{/${name}}} 包住，`
+           + `它不出现的那些图会留下空标签`
+      });
+    }
+  }
+  return { warns };
 }
 
 /** 取某个占位符的候选值（已过滤空行）。 */
@@ -3968,7 +4085,8 @@ function renderTplTags(){
   });
 }
 
-/** 校验当前模板 + 数组。返回 {errors, unused}，并把结果显示到 UI。 */
+/** 校验当前模板 + 数组。返回 {errors, unused, warns}，并把结果显示到 UI。
+ *  错误（红）= 拦住生成；警告（黄）= 能跑但建议改。两者分开显示。 */
 function validateBatch(){
   const tpl = S.m.batch.template || '';
   const r = validateTemplate(tpl, S.m.batch.slots);
@@ -3989,6 +4107,22 @@ function validateBatch(){
       tb.classList.remove('bad');
     }
   }
+
+  // 警告：独立通道。有错误时不再叠警告，避免红黄一起刷屏。
+  const wr = errs.length ? { warns: [] } : warnTemplate(tpl, S.m.batch.slots);
+  r.warns = wr.warns;
+  const wbox = $('#tplWarn');
+  if (wbox){
+    if (wr.warns.length){
+      wbox.innerHTML = wr.warns.slice(0, 4).map(w =>
+        `<div class="li">💡 ${escapeHtml(w.msg)}</div>`
+      ).join('');
+      wbox.classList.add('show');
+    } else {
+      wbox.classList.remove('show');
+      wbox.innerHTML = '';
+    }
+  }
   return r;
 }
 
@@ -4006,7 +4140,7 @@ function escapeHtml(s){
        - 使用：把模板套到当前面板（先自动备份当前内容）
        - 覆盖：把当前面板的内容存回这个已有模板（先确认，不可撤销）
    · 使用前自动把「当前」存进一个备份槽，可一键撤回（只留最近一次）
-   · 与「恢复默认模板」并列，不互相取代
+   · 与「恢复示例」并列，不互相取代
    · ★ 落盘在 <模板目录>/<id>.json，一个模板一个文件（不再挤在 config.json）
        权威源是独立文件：手工打开某个文件改完即生效，不会被整份配置覆盖
        文件名用 id（稳定、无中文/空格转义问题），改名不动文件
@@ -5118,8 +5252,16 @@ async function runBatchLoop(startAt){
   const rst = $('#tplReset');
   if (rst){
     rst.onclick = async () => {
-      if (!confirm('恢复默认？\n\n会重置模板文本和所有占位符数组（回到出厂 3 组、各 6 条）。\n你自己加的数组会全部丢失。')) return;
-      // ★ 与模板库一致：恢复前先备份当前内容，误点可撤回      saveBatchPane();
+      const n = BATCH_FACTORY.slots.length;
+      const c = BATCH_FACTORY.slots.reduce((a, s) => a * s.values.length, 1);
+      if (!confirm(
+        '恢复示例？\n\n' +
+        `会把模板文本和所有占位符数组换成出厂示例（${n} 个占位符，共 ${c} 种组合）。\n` +
+        '你自己加的数组会全部丢失。\n\n' +
+        '这只是个教学示例，不是推荐配置。\n' +
+        '你保存过的模板不受影响，恢复后仍可在「我的模板」里一键用回来。'
+      )) return;
+      // ★ 与模板库一致：恢复前先备份当前内容，误点可撤回
       S.b.tplBackup = snapshotBatch('恢复前的状态');
       S.m.batch.template = BATCH_FACTORY.template;
       S.m.batch.slots = cloneFactorySlots();
@@ -5132,7 +5274,7 @@ async function runBatchLoop(startAt){
       validateBatch();
       await planSave();
       updateUndoBtn();
-      setStat('已恢复默认模板与数组。点「↩ 撤回上次使用」可还原。', 'on');
+      setStat('已恢复示例模板与数组。点「↩ 撤回上次使用」可还原。', 'on');
     };
   }
 

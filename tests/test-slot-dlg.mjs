@@ -256,6 +256,86 @@ console.log('\n=== 10. 行号按「视觉行」编号（软换行不错位）===
   chk(Math.abs(lh - 21.25) < 0.01, `无单位 line-height 换算成像素（1.7 × 12.5 = ${lh}）`);
 }
 
+console.log('\n=== 11. 模板写法速查（条件块此前在 UI 上没有任何入口）===');
+{
+  const help = $('#tplHelp');
+  chk(!!help, '速查区存在');
+  chk(help.tagName.toLowerCase() === 'details', '用 details 实现（原生折叠，无需 JS）');
+  chk(!help.hasAttribute('open'), '★ 默认收起（不占面板高度）');
+  const txt = help.textContent;
+  chk(txt.includes('{{名称}}'), '讲了取值占位符写法');
+  chk(txt.includes('{{#名称}}') && txt.includes('{{/名称}}'), '★ 讲了条件块写法（核心：此前 UI 完全没提）');
+  chk(/缺席|不出现/.test(txt), '解释了条件块「缺席时整块删除」的行为');
+  chk(/标签/.test(txt), '★ 点明了「标签要包进块里」这个最容易写错的地方');
+  chk(/不能含空格|不可含空格/.test(txt), '讲了命名规则');
+  chk(/最小可跑示例|直接抄/.test(txt), '★ 给了可直接抄的最小示例');
+  chk(/20%|概率/.test(txt), '给了可选占位符的例子');
+
+  // 速查里给出的示例必须真的能跑 —— 否则教程本身就在教错
+  const r = JSON.parse(w.eval(`
+    (() => {
+      const tpl = '一位女孩，{{#眼镜}}戴{{眼镜}}，{{/眼镜}}穿{{鞋子}}。';
+      const slots = [
+        { name: '眼镜', values: ['银色细框圆形眼镜'], p: 0.2 },
+        { name: '鞋子', values: ['白色运动鞋'] }
+      ];
+      const v = validateTemplate(tpl, slots);
+      const ww = warnTemplate(tpl, slots);
+      const on  = renderPrompt(tpl, { 眼镜: '银色细框圆形眼镜', 鞋子: '白色运动鞋' });
+      const off = renderPrompt(tpl, { 眼镜: null, 鞋子: '白色运动鞋' });
+      return JSON.stringify({ errs: v.errors.length, warns: ww.warns.length, on, off });
+    })()
+  `));
+  console.log('    出现时: ' + r.on);
+  console.log('    缺席时: ' + r.off);
+  chk(r.errs === 0, '速查里的可选占位符示例零错误');
+  chk(r.warns === 0, '速查里的示例不触发警告（条件块用对了）');
+  chk(r.on.includes('戴银色细框圆形眼镜'), '示例：出现时正常渲染');
+  chk(!r.off.includes('眼镜') && r.off.includes('穿白色运动鞋'),
+      '★ 示例：缺席时整块连「戴」字一起消失，不留空标签');
+}
+
+console.log('\n=== 12. 警告通道（黄色提醒，不拦生成）===');
+{
+  const r = JSON.parse(w.eval(`
+    (() => {
+      S.m.batch.slots = [
+        { name: '眼镜', values: ['银色细框圆形眼镜'], p: 0.2 },
+        { name: '鞋子', values: ['白色运动鞋'] }
+      ];
+      const ta = fld('batch','template');
+      // 裸写可选占位符 → 应当出现黄色警告
+      ta.value = '眼镜：{{眼镜}}。鞋子：{{鞋子}}。';
+      S.m.batch.template = ta.value;
+      const v1 = validateBatch();
+      const o1 = {
+        warnShown: $('#tplWarn').classList.contains('show'),
+        warnText: $('#tplWarn').textContent,
+        errShown: $('#tplErr').classList.contains('show'),
+        errs: v1.errors.length,
+        warns: v1.warns.length
+      };
+      // 包进条件块 → 警告消失
+      ta.value = '{{#眼镜}}眼镜：{{眼镜}}。{{/眼镜}}鞋子：{{鞋子}}。';
+      S.m.batch.template = ta.value;
+      const v2 = validateBatch();
+      const o2 = {
+        warnShown: $('#tplWarn').classList.contains('show'),
+        warns: v2.warns.length,
+        errs: v2.errors.length
+      };
+      return JSON.stringify({ o1, o2 });
+    })()
+  `));
+  console.log('    裸写: ' + JSON.stringify(r.o1).slice(0, 150));
+  chk(r.o1.warnShown, '★ 裸写可选占位符 → 黄色警告出现');
+  chk(r.o1.warnText.includes('眼镜'), '警告里点出了具体占位符');
+  chk(!r.o1.errShown && r.o1.errs === 0, '★ 警告不是错误（不标红、不拦生成）');
+  chk(r.o1.warns === 1, `警告恰好 1 条（实际 ${r.o1.warns}）`);
+  chk(!r.o2.warnShown && r.o2.warns === 0, '★ 包进条件块后警告消失');
+  chk(r.o2.errs === 0, '包块后仍零错误');
+}
+
 console.log('\n页面异常: ' + (errs.length ? errs.slice(0, 3).join(' | ') : '无'));
 if (errs.length) fail += errs.length;
 console.log('\n' + '─'.repeat(50));
