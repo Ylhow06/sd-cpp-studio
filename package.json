@@ -1,6 +1,6 @@
 {
   "name": "sd-cpp-studio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "stable-diffusion.cpp 本地生图工作台（单文件 UI + 配置服务 + 测试）",
   "type": "module",
