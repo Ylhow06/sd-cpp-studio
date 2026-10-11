@@ -190,10 +190,14 @@ button.b.sm{padding:5px 8px;font-size:12px}
 
 /* ── 点击放大（灯箱）──
    舞台受面板高度限制，竖图永远看不全，所以给一个全窗口的查看层。
-   滚轮缩放、拖动平移、双击还原；四个入口：点图 / Esc / 点背景 / 点关闭。 */
+   滚轮缩放、拖动平移、双击还原；四个入口：点图 / Esc / 点背景 / 点关闭。
+
+   ★ 遮罩不用 backdrop-filter:blur()：它是全屏固定层，模糊会让浏览器
+     每帧重算整屏背景，而灯箱里恰恰要频繁拖动 / 缩放图片 —— 会明显拖慢。
+     反正遮罩本来就 94% 不透明，模糊在视觉上几乎看不出来。 */
 #lightbox{
   position:fixed;inset:0;z-index:60;display:none;
-  background:rgba(6,8,11,.94);backdrop-filter:blur(6px);
+  background:rgba(6,8,11,.94);
   overflow:hidden;user-select:none;
 }
 #lightbox.show{display:block}
@@ -229,9 +233,11 @@ button.b.sm{padding:5px 8px;font-size:12px}
   color:var(--fg3);pointer-events:none;
 }
 
-/* 生成中 */
+/* 生成中
+   ★ 同样不用 backdrop-filter：它盖住整个舞台，而生成期间用户还会
+     滚动历史 / 缩略图条，模糊会让那些滚动掉帧。加深底色即可。 */
 #overlay{
-  position:absolute;inset:0;background:rgba(13,15,19,.84);backdrop-filter:blur(4px);
+  position:absolute;inset:0;background:rgba(13,15,19,.9);
   display:none;flex-direction:column;align-items:center;justify-content:center;gap:15px;z-index:8;
 }
 #overlay.show{display:flex}
@@ -553,7 +559,8 @@ button.b.sm{padding:5px 8px;font-size:12px}
 /* ── 指定保存路径弹窗 ── */
 #pathDlg{
   position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;
-  background:rgba(8,10,14,.72);backdrop-filter:blur(3px);
+  /* ★ 这里刻意**不用** backdrop-filter:blur()，理由同 #slotDlg（见下方注释）。 */
+  background:rgba(8,10,14,.84);
 }
 #pathDlg.show{display:flex}
 .pd-box{
@@ -604,10 +611,18 @@ button.b.sm{padding:5px 8px;font-size:12px}
 /* ── 占位符取值编辑器弹窗（左侧选占位符 / 右侧编辑） ──
    原先所有占位符的编辑器平铺在批量面板里，占位符一多（裙子模板 11 个）
    整页就被撑得极长，要改某一个得来回滚。改成弹窗后，左侧一列选，
-   右侧只渲染当前这一个。 */
+   右侧只渲染当前这一个。
+
+   ★ 遮罩刻意**不用** backdrop-filter:blur()。
+     它是 position:fixed;inset:0 的全屏层，而 backdrop-filter 会让浏览器
+     在【每一帧】重新对整屏背景做一次模糊合成 —— 在弹窗里滚动那个行号
+     取值框时，每滚一点都要重算整屏模糊，表现就是上下滑动卡顿。
+     换成更不透明的纯色遮罩，视觉几乎一样（背景本来就该被压暗），
+     但滚动不再触发全屏重绘。同类问题见 VitePress #1049、
+     Mozilla Bug 1718471、headlessui #690。 */
 #slotDlg{
   position:fixed;inset:0;z-index:45;display:none;align-items:center;justify-content:center;
-  background:rgba(8,10,14,.72);backdrop-filter:blur(3px);
+  background:rgba(8,10,14,.84);
 }
 #slotDlg.show{display:flex}
 .sd-box{
@@ -3653,8 +3668,19 @@ function measureVisualRows(ta){
   return probe.map(d => Math.max(1, Math.round(d.offsetHeight / lh)));
 }
 
-/** 给一个 textarea 挂上行号槽（返回「重新测量并重绘」的函数）。
- *  滚动只同步 scrollTop，不重新测量 —— 测量要读 offsetHeight，很贵。 */
+/** 给一个 textarea 挂上行号槽。
+ *
+ *  返回 `{ sync, destroy }`：
+ *    · sync()    重新测量并按视觉行重绘行号（内容 / 宽度变化时调）
+ *    · destroy() 解绑监听与 observer（**重建控件前必须调**，否则泄漏）
+ *
+ *  性能要点（这几条决定了滚动跟不跟手）：
+ *    · 滚动路径**只**同步 scrollTop，绝不重新测量 —— 测量要逐行读
+ *      offsetHeight，是最贵的操作（PrismJS 的行号插件就是栽在这里：
+ *      滚动时反复做全量布局计算，直接卡死）。
+ *    · 滚动同步用 rAF 合帧，避免一帧内多次写样式。
+ *    · ResizeObserver 只在**宽度**变化时才重测（滚动不改宽度，
+ *      不该触发测量）。 */
 function attachGutter(ta, gutter){
   const paint = (items) => {
     if (gutter.childElementCount !== items.length){
@@ -3688,15 +3714,49 @@ function attachGutter(ta, gutter){
     paint(gutterItemsFor(lines, measureVisualRows(ta)));
     gutter.scrollTop = ta.scrollTop;
   };
-  const follow = () => { gutter.scrollTop = ta.scrollTop; };
+  /* 滚动只同步 scrollTop。
+     ★ 用 rAF 合帧：滚动事件可能一帧内触发多次（触控板 / 高刷屏），
+       每次都写 scrollTop 会排队做多次样式计算。合并到每帧一次即可，
+       视觉上无差别，但不再出现「滑动时一卡一卡」。 */
+  let rafId = 0;
+  const follow = () => {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      gutter.scrollTop = ta.scrollTop;
+    });
+  };
 
   ta.addEventListener('input', sync);
-  ta.addEventListener('scroll', follow);
-  // 宽度变化会影响折行（弹窗打开 / 窗口缩放）
+  ta.addEventListener('scroll', follow, { passive: true });
+
+  /* 宽度变化会影响折行（弹窗打开 / 窗口缩放）。
+     ★ 只订阅宽度：测量很贵（逐行读 offsetHeight），而滚动不会改宽度。
+       旧写法对任何尺寸变化都重测，等于把测量挂到了不必要的路径上。 */
+  let lastW = -1;
+  let ro = null;
   if (typeof ResizeObserver === 'function'){
-    try { new ResizeObserver(sync).observe(ta); } catch (_){}
+    try {
+      ro = new ResizeObserver(entries => {
+        const w = entries[0]?.contentRect?.width ?? -1;
+        if (w === lastW) return;
+        lastW = w;
+        sync();
+      });
+      ro.observe(ta);
+    } catch (_){ ro = null; }
   }
-  return sync;
+  /* ★ 返回的对象带 destroy：调用方重建控件前先销毁旧的，
+     否则每渲染一次就多留一个 observer + 一个 rAF 回调（泄漏）。 */
+  return {
+    sync,
+    destroy(){
+      if (rafId){ cancelAnimationFrame(rafId); rafId = 0; }
+      if (ro){ try { ro.disconnect(); } catch (_){} ro = null; }
+      ta.removeEventListener('input', sync);
+      ta.removeEventListener('scroll', follow);
+    }
+  };
 }
 
 /* ────────── 数组编辑器 ──────────
@@ -3710,10 +3770,24 @@ function attachGutter(ta, gutter){
 /** 当前正在编辑的槽位下标（弹窗用）。-1 = 没选。 */
 let slotDlgIndex = -1;
 
+/** 弹窗右侧取值框的行号控件句柄（含 destroy）。
+ *  每次 renderSlotDlg 重建编辑区前先销毁它，避免 ResizeObserver / 监听器泄漏。 */
+let SLOT_DLG_GUTTER = null;
+
+/** #slotList（隐藏的真相容器）里每个槽位的行号控件句柄，同样用于重建前销毁。 */
+let SLOT_LIST_GUTTERS = [];
+
 function renderSlotEditor(){
   const box = $('#slotList');
   if (!box) return;
   const b = S.m.batch;
+
+  /* ★ innerHTML='' 会把旧节点连同挂在它们身上的 ResizeObserver / 监听器
+     一起丢掉 —— 但 observer 本身仍持有对已脱离节点的引用，属于泄漏。
+     重建前先把上一批逐个销毁。 */
+  SLOT_LIST_GUTTERS.forEach(g => { try { g.destroy(); } catch (_){} });
+  SLOT_LIST_GUTTERS = [];
+
   box.innerHTML = '';
 
   if (!b.slots.length){
@@ -3799,8 +3873,9 @@ function renderSlotEditor(){
     gutter.setAttribute('aria-hidden', 'true');
     wrap.append(gutter, nv);
     // 首屏与后续程序化改值（如套用模板）都要刷新
-    nv.__syncGutter = attachGutter(nv, gutter);
-    nv.__syncGutter();
+    nv.__gutter = attachGutter(nv, gutter);
+    SLOT_LIST_GUTTERS.push(nv.__gutter);
+    nv.__gutter.sync();
 
     const bad = document.createElement('div');
     bad.className = 'bad';
@@ -3841,6 +3916,15 @@ function renderSlotDlg(){
   const b = S.m.batch;
   const nav = $('#slotDlgNav');
   if (!nav) return;
+
+  /* ★ 本函数每次都重建右侧编辑区（含 textarea）。重建前先把上一个的
+     行号控件销毁掉 —— 否则每次重渲染都会留下一个 ResizeObserver 与
+     挂在这个即将被丢弃的 textarea 上的监听器（泄漏）。
+     弹窗里改名 / 改概率 / 切换占位符都会走这里，泄漏会累积。 */
+  if (SLOT_DLG_GUTTER && typeof SLOT_DLG_GUTTER.destroy === 'function'){
+    try { SLOT_DLG_GUTTER.destroy(); } catch (_){}
+  }
+  SLOT_DLG_GUTTER = null;
 
   // 夹紧下标（可能刚删过）
   if (slotDlgIndex >= b.slots.length) slotDlgIndex = b.slots.length - 1;
@@ -4012,9 +4096,11 @@ function renderSlotDlg(){
   ta.placeholder = '每行一条取值\n黑色皮夹克内搭白T恤\n黄色针织马甲配牛仔短裙';
 
   wrap.append(gutter, ta);
-  const syncGutter = attachGutter(ta, gutter);
+  const gutterCtl = attachGutter(ta, gutter);
+  ta.__gutter = gutterCtl;              // 与 #slotList 里的写法保持一致
+  SLOT_DLG_GUTTER = gutterCtl;          // 供下次重建前销毁（见 renderSlotDlg 开头）
   ta.addEventListener('input', () => {
-    syncGutter();
+    gutterCtl.sync();
     if (srcTa) srcTa.value = ta.value;        // 同步给「真相」控件
     onSlotEdit();
     if (nlab) nlab.textContent = `${ta.value.split('\n').map(x => x.trim()).filter(x => x !== '').length} 条`;
@@ -4027,8 +4113,8 @@ function renderSlotDlg(){
 
   /* ★ 必须在挂进文档之后再量：元素不在文档里时宽度为 0，测不出折行。
      先同步一次，再用 rAF 补一次（拿到真实宽度后的最终结果）。 */
-  syncGutter();
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncGutter);
+  gutterCtl.sync();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(gutterCtl.sync);
 
   // 空数组 / 未引用 的提示
   const usedNow = slotIsUsed(s.name);
@@ -4461,7 +4547,13 @@ function applyTemplate(t, opt = {}){
   return true;
 }
 
-/** 当前面板是否和某个模板一致（用于列表高亮） */
+/** 当前面板是否和某个模板一致（用于列表高亮 / 覆盖前判断）。
+ *
+ *  ★ 必须逐字段比全 —— 少比一个字段就会出现「改了却不认为变过」：
+ *    曾漏比 `p`（出现概率），于是只调概率后点「覆盖」会被判成
+ *    「当前内容与模板一致，无需覆盖」，用户的修改被静默丢掉。
+ *    `p` 参与判定时要按「缺省 = 必选 = 1」归一化，
+ *    否则 `p` 缺省与 `p: 1` 这两种等价的写法会被误判为不同。 */
 function isSameAsTemplate(t){
   if (!t) return false;
   const b = S.m.batch;
@@ -4472,6 +4564,8 @@ function isSameAsTemplate(t){
   if (a.length !== c.length) return false;
   for (let i = 0; i < a.length; i++){
     if ((a[i].name || '') !== (c[i].name || '')) return false;
+    // 概率：slotProb 已把「缺省 / 非法 / >=1」统一归为 1
+    if (slotProb(a, a[i].name) !== slotProb(c, c[i].name)) return false;
     const av = a[i].values || [], cv = c[i].values || [];
     if (av.length !== cv.length) return false;
     for (let j = 0; j < av.length; j++) if (av[j] !== cv[j]) return false;

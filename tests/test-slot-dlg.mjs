@@ -305,6 +305,77 @@ console.log('\n=== 10. 行号按「视觉行」编号（软换行不错位）===
   chk(Math.abs(lh - 21.25) < 0.01, `无单位 line-height 换算成像素（1.7 × 12.5 = ${lh}）`);
 }
 
+console.log('\n=== 10b. 滚动不重测 + 重建不泄漏（性能回归）===');
+{
+  /* ★ 曾经的问题：在弹窗里上下滑动取值框会卡顿。
+     两个原因，这里各锁一条：
+
+     ① 滚动路径绝不能触发「重新测量」。测量要逐行读 offsetHeight
+        （强制同步布局），是最贵的操作；滚动时每帧做一次就会卡。
+        PrismJS 的行号插件正是栽在这里（issue #2123）。
+     ② 每次 renderSlotDlg 都会重建右侧编辑区（含 textarea）。旧实现
+        每次都 new 一个 ResizeObserver 且从不解绑 —— 切几次占位符
+        就攒下几个 observer 和一批挂在废弃节点上的监听器。
+
+     测量次数用「读镜像 div 的 offsetHeight」来计数：measureVisualRows
+     每测一行就要读一次 offsetHeight，这是它的特征操作。 */
+  w.eval(`if (!$('#slotDlg').classList.contains('show')) $('#slotOpen').click();`);
+  await new Promise(r => setTimeout(r, 250));
+
+  const r = JSON.parse(w.eval(`
+    (() => {
+      const ta = $('#slotDlgVals');
+
+      // 给镜像里的行 div 装计数器
+      window.__layoutReads = 0;
+      const mirror = document.getElementById('nvMirror');
+      if (mirror){
+        [...mirror.children].forEach(d => {
+          Object.defineProperty(d, 'offsetHeight', {
+            configurable: true,
+            get(){ window.__layoutReads++; return 21.25; }
+          });
+        });
+      }
+
+      // 滚动 5 次，每次之间让出一帧
+      const readsBefore = window.__layoutReads;
+      for (let i = 1; i <= 5; i++){
+        ta.scrollTop = i * 10;
+        ta.dispatchEvent(new Event('scroll'));
+      }
+      return JSON.stringify({
+        readsDuringScroll: window.__layoutReads - readsBefore,
+        hasDestroy: typeof (ta.__gutter && ta.__gutter.destroy) === 'function',
+        dlgHasDestroy: typeof (SLOT_DLG_GUTTER && SLOT_DLG_GUTTER.destroy) === 'function',
+        gutterCount: SLOT_LIST_GUTTERS.length,
+        slotCount: S.m.batch.slots.length
+      });
+    })()
+  `));
+  console.log('    ' + JSON.stringify(r));
+  chk(r.readsDuringScroll === 0,
+      `★ 滚动过程中一次布局测量都没做（实际 ${r.readsDuringScroll} 次）—— 旧实现会重测`);
+  chk(r.hasDestroy, '★ attachGutter 返回的对象带 destroy（可解绑，旧实现无从解绑）');
+  chk(r.dlgHasDestroy, '★ 弹窗的行号控件句柄被记录（重建前能销毁）');
+  chk(r.gutterCount === r.slotCount,
+      `★ #slotList 的句柄数与槽位数一致（${r.gutterCount} vs ${r.slotCount}）—— 没有累积`);
+
+  /* 重建若干次（切占位符 / 改概率都会走 renderSlotDlg），
+     确认句柄数不增长 —— 旧实现每重建一次就多留一个 observer。 */
+  const before = w.eval('SLOT_LIST_GUTTERS.length');
+  for (let i = 0; i < 3; i++){
+    w.eval(`slotDlgIndex = 0; renderSlotDlg();`);
+    await new Promise(r => setTimeout(r, 60));
+  }
+  const after = w.eval('SLOT_LIST_GUTTERS.length');
+  chk(after === before, `★ 连续重建 3 次后 #slotList 句柄数不变（${before} → ${after}）`);
+
+  chk(w.eval('SLOT_DLG_GUTTER !== null') === true, '弹窗句柄仍有效（重建后重新挂上）');
+  const dlgCount = w.eval(`$$('#slotDlg textarea').length`);
+  chk(dlgCount === 1, `弹窗里仍只有一个 textarea（实际 ${dlgCount}）`);
+}
+
 console.log('\n=== 11. 模板写法速查（条件块此前在 UI 上没有任何入口）===');
 {
   const help = $('#tplHelp');

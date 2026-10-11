@@ -298,6 +298,60 @@ console.log('\n=== C2. 覆盖：把当前内容存回指定模板 ===');
   chk(TB().length === 2, '模板总数仍然是 2');
 }
 
+console.log('\n=== D3. ★ 只改概率也必须算「有变化」（回归）===');
+{
+  /* ★ 曾经踩的坑：isSameAsTemplate() 逐字段比了 template / skipDup / count /
+     name / values，唯独**漏比 p（出现概率）**。于是把某个占位符从
+     必选改成 50% 后点「覆盖」，会被判成「当前内容与模板一致，无需覆盖」，
+     用户的修改被静默丢掉 —— 而且没有任何提示说它没生效。
+
+     这里锁住三件事：
+       1. 只改概率 → 必须认为「有变化」，覆盖真的写进去
+       2. 概率缺省与 p=1 语义等价 → 不该被判成有变化（否则每次覆盖都白写一次盘）
+       3. 反向：改回原概率后又能被判回「一致」 */
+  const id = TB()[0].id;
+  setPane('概率测试 {{眼镜}}', [{ name: '眼镜', values: ['a', 'b'], p: 0.5 }], 3, true);
+  await w.eval(`overwriteTemplate(${JSON.stringify(id)})`);
+  await tick();
+  chk(TB().find(t => t.id === id).slots[0].p === 0.5, '先把模板存成 p=0.5');
+
+  // 1. 只动概率：0.5 → 0.8
+  const atBefore = TB().find(t => t.id === id).at;
+  setPane('概率测试 {{眼镜}}', [{ name: '眼镜', values: ['a', 'b'], p: 0.8 }], 3, true);
+  chk(w.eval(`isSameAsTemplate((S.b.templates||[]).find(t=>t.id===${JSON.stringify(id)}))`) === false,
+      '★ 只改概率 → isSameAsTemplate 判为「不同」（旧实现这里返回 true）');
+  await w.eval(`overwriteTemplate(${JSON.stringify(id)})`);
+  await tick();
+  const after = TB().find(t => t.id === id);
+  chk(after.slots[0].p === 0.8, `★ 概率改动被真正覆盖进去（实际 p=${after.slots[0].p}）`);
+  chk(after.at >= atBefore, '★ 覆盖确实发生了（保存时间被刷新）');
+
+  // 2. 概率从 0.8 改回「必选」：p 字段移除（等价于 p=1）
+  setPane('概率测试 {{眼镜}}', [{ name: '眼镜', values: ['a', 'b'] }], 3, true);
+  chk(w.eval(`isSameAsTemplate((S.b.templates||[]).find(t=>t.id===${JSON.stringify(id)}))`) === false,
+      '★ 从 0.8 改回必选也算有变化');
+  await w.eval(`overwriteTemplate(${JSON.stringify(id)})`);
+  await tick();
+  const after2 = TB().find(t => t.id === id);
+  chk(w.eval(`slotProb(${JSON.stringify(after2.slots)}, '眼镜')`) === 1,
+      '★ 覆盖后变成必选（p 缺省）');
+
+  // 3. 缺省 p 与显式 p:1 语义等价 → 不该被判成有变化
+  setPane('概率测试 {{眼镜}}', [{ name: '眼镜', values: ['a', 'b'], p: 1 }], 3, true);
+  chk(w.eval(`isSameAsTemplate((S.b.templates||[]).find(t=>t.id===${JSON.stringify(id)}))`) === true,
+      '★ p 缺省 与 p:1 等价，不判为变化（避免无意义的重写盘）');
+
+  // 4. 真正一致时仍判为一致
+  setPane('概率测试 {{眼镜}}', [{ name: '眼镜', values: ['a', 'b'] }], 3, true);
+  chk(w.eval(`isSameAsTemplate((S.b.templates||[]).find(t=>t.id===${JSON.stringify(id)}))`) === true,
+      '★ 完全一致时仍判为一致');
+
+  // 5. 概率改动也会影响「使用模板」的备份判定
+  setPane('概率测试 {{眼镜}}', [{ name: '眼镜', values: ['a', 'b'], p: 0.3 }], 3, true);
+  chk(w.eval(`isSameAsTemplate((S.b.templates||[]).find(t=>t.id===${JSON.stringify(id)}))`) === false,
+      '★ 使用模板前也认得出概率差异（否则不会备份，误操作无法撤回）');
+}
+
 console.log('\n=== D. 撤回：回到使用前 ===');
 {
   // C2 把备份槽清空了，这里重新造一个「使用前」的场景，
